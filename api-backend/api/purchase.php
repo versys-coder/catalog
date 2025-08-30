@@ -1,10 +1,7 @@
 <?php
 declare(strict_types=1);
 
-// purchase.php — актуализированная версия для QR только по номеру телефона и красивого pdf
-// Принимает JSON { service_id, phone, email, ... }
-// Вызывает FastSales, генерирует PDF (по шаблону), QR только с номером, сохраняет мета, отправляет письмо, нотифицирует внешнюю систему
-
+// purchase.php — версия с гарантированной отправкой писем в UTF-8 без кракозябр
 require __DIR__ . '/../../vendor/autoload.php';
 
 use Dotenv\Dotenv;
@@ -96,7 +93,7 @@ $SMTP_FROM_NAME = safe_getenv('SMTP_FROM_NAME', 'DVVS');
 
 // External notify (optional)
 $EXTERNAL_NOTIFY_URL = safe_getenv('EXTERNAL_NOTIFY_URL', '');
-$EXTERNAL_NOTIFY_AUTH = safe_getenv('EXTERNAL_NOTIFY_AUTH', ''); // e.g. "Bearer xxxxx" or "Basic abc"
+$EXTERNAL_NOTIFY_AUTH = safe_getenv('EXTERNAL_NOTIFY_AUTH', '');
 
 if ($FASTSALE_ENDPOINT === '' || $CLUB_ID === '') {
     respond(false, 'Server misconfigured (FASTSALE_ENDPOINT and CLUB_ID required)');
@@ -302,18 +299,20 @@ try {
         $mail->isMail();
     }
 
-    // nice HTML body
+    // ОБЯЗАТЕЛЬНО: чтобы не было кракозябр
+    $mail->CharSet = 'UTF-8';
+    $mail->Encoding = PHPMailer::ENCODING_BASE64;
+    $mail->setFrom($SMTP_FROM, $SMTP_FROM_NAME);
+    $mail->addAddress($email);
+    $mail->Subject = 'Ваш абонемент — ' . htmlspecialchars($serviceName);
+    $mail->isHTML(true);
     $mailBody = '<p>Здравствуйте!</p>';
     $mailBody .= '<p>Спасибо за покупку: <strong>' . htmlspecialchars($serviceName) . '</strong></p>';
     $mailBody .= '<p>Документ: <strong>' . htmlspecialchars($docId) . '</strong></p>';
     $mailBody .= '<p>Ссылка для скачивания ваучера: <a href="' . htmlspecialchars($voucherPublicWithToken) . '">скачать ваучер</a></p>';
     $mailBody .= '<p>Если у вас возникают проблемы, свяжитесь с поддержкой.</p>';
-
-    $mail->setFrom($SMTP_FROM, $SMTP_FROM_NAME);
-    $mail->addAddress($email);
-    $mail->Subject = 'Ваш абонемент — ' . htmlspecialchars($serviceName);
-    $mail->isHTML(true);
     $mail->Body = $mailBody;
+    $mail->AltBody = 'Спасибо за покупку. Ссылка на ваучер: ' . $voucherPublicWithToken;
 
     if ($pdfCreated && is_readable($voucherFile)) {
         $mail->addAttachment($voucherFile, 'abonement-' . $docId . '.pdf');
