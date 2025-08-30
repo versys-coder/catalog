@@ -1,311 +1,327 @@
-import React, { useEffect, useState } from "react";
-import "./services.css";
-import { services as fallbackServices, Service as LocalService } from "./data/services";
+<?php
+declare(strict_types=1);
 
-/*
-  Обновлённый App.tsx:
-  - Загружает список услуг с backend API (POST /catalog/api-backend/api/services),
-    мэпит ответ в локальную структуру Service.
-  - Если API не доступен — показывает fallback из src/data/services.ts.
-  - Сохраняет функционал покупки/ваучера/попапа.
-*/
+// purchase.php
+// Принимает JSON { service_id, phone, email, ... }
+// Генерирует docId, вызывает FastSales API, генерирует PDF-ваучер (mPDF),
+// создаёт QR по public URL ваучера (с phone внутри ссылки),
+// отправляет письмо через SMTP (PHPMailer) и возвращает JSON { ok: true, voucher_url: ... }
 
-type BuyStatus = "idle" | "loading" | "success" | "error";
+require __DIR__ . '/../../vendor/autoload.php';
 
-type PurchaseResponse = {
-  ok: boolean;
-  message?: string;
-  voucher_url?: string;
-};
+use Dotenv\Dotenv;
+use Mpdf\Mpdf;
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception as MailException;
 
-export default function App() {
-  const [services, setServices] = useState<LocalService[]>(fallbackServices);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+// If chillerlan/php-qrcode is available (matches diff usage)
+use chillerlan\QRCode\QROptions;
+use chillerlan\QRCode\QRCode;
 
-  const [selected, setSelected] = useState<LocalService | null>(null);
-  const [isPopupOpen, setIsPopupOpen] = useState(false);
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [buyStatus, setBuyStatus] = useState<BuyStatus>("idle");
-  const [buyMessage, setBuyMessage] = useState("");
-  const [voucherUrl, setVoucherUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-
-    async function load() {
-      setLoading(true);
-      setError(null);
-
-      try {
-        // Попытка получить каталог с PHP-эндпойнта (production layout)
-        // backend в репо ожидает POST /catalog/api-backend/api/services
-        const res = await fetch("/catalog/api-backend/api/services", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}) // backend может принимать тело
-        });
-
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-
-        const data = await res.json();
-
-        // Ожидаемые варианты ответов: { goods: [...] } или { items: [...] } или сразу массив
-        let items: any[] = [];
-        if (Array.isArray(data)) items = data;
-        else if (Array.isArray(data.goods)) items = data.goods;
-        else if (Array.isArray(data.items)) items = data.items;
-        else if (Array.isArray(data.data)) items = data.data;
-        else {
-          // fallback на старую структуру или если API вернул объект с полями
-          // попробуем обернуть в массив, если это единичный объект
-          if (data && typeof data === "object") items = [data];
-        }
-
-        // map API items -> LocalService
-        const mapped: LocalService[] = items.map((it: any) => {
-          const id = it.id ?? it.ID ?? it.code ?? String(it.name ?? it.title ?? Math.random());
-          const title = it.title ?? it.name ?? it.service_name ?? it.caption ?? id;
-          const shortDescription = it.shortDescription ?? it.description ?? it.desc ?? it.text ?? "";
-          // price может быть объектом или числом/строкой
-          let priceObj = { value: 0, currency: "₽", unit: "" };
-          if (it.price && typeof it.price === "object") {
-            priceObj = {
-              value: Number(it.price.value ?? it.price.sum ?? it.price.summ ?? 0) || 0,
-              currency: it.price.currency ?? "₽",
-              unit: it.price.unit ?? ""
-            };
-          } else if (it.price != null) {
-            priceObj = { value: Number(it.price) || 0, currency: "₽", unit: "" };
-          } else if (it.summ != null) {
-            priceObj = { value: Number(it.summ) || 0, currency: "₽", unit: "" };
-          } else if (it.cost != null) {
-            priceObj = { value: Number(it.cost) || 0, currency: "₽", unit: "" };
-          }
-
-          const duration = it.duration ?? it.visits ?? undefined;
-          const tags = Array.isArray(it.tags) ? it.tags : (typeof it.tags === "string" ? [it.tags] : undefined);
-          const imageUrl = it.imageUrl ?? it.image ?? it.img ?? "";
-          const bookingUrl = it.bookingUrl ?? it.booking_url ?? it.href ?? "#";
-          const highlight = Boolean(it.highlight ?? it.popular ?? false);
-
-          return {
-            id: String(id),
-            title,
-            shortDescription,
-            price: priceObj,
-            duration,
-            tags,
-            imageUrl,
-            bookingUrl,
-            highlight
-          } as LocalService;
-        });
-
-        if (mounted) {
-          // если mapped пуст — не затираем fallback, но логируем
-          if (mapped.length === 0) {
-            setError("API вернул пустой каталог — используется локальный fallback.");
-            setServices(fallbackServices);
-          } else {
-            setServices(mapped);
-          }
-          setLoading(false);
-        }
-      } catch (err: any) {
-        if (mounted) {
-          console.error("Error loading services:", err);
-          setError(String(err.message || err));
-          setServices(fallbackServices);
-          setLoading(false);
-        }
-      }
-    }
-
-    load();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  function openBuy(service: LocalService) {
-    setSelected(service);
-    setPhone("");
-    setEmail("");
-    setBuyStatus("idle");
-    setBuyMessage("");
-    setVoucherUrl(null);
-    setIsPopupOpen(true);
-  }
-
-  function closePopup() {
-    setIsPopupOpen(false);
-    setSelected(null);
-    setVoucherUrl(null);
-    setBuyStatus("idle");
-    setBuyMessage("");
-  }
-
-  async function submitBuy(e: React.FormEvent) {
-    e.preventDefault();
-    if (!selected) return;
-    if (!phone.trim() || !email.trim()) {
-      setBuyStatus("error");
-      setBuyMessage("Заполните телефон и e‑mail");
-      return;
-    }
-
-    setBuyStatus("loading");
-    setBuyMessage("");
-
-    try {
-      const priceValue = selected.price?.value ?? 0;
-      const visits = (selected as any).visits ?? selected.duration ?? "";
-      const freezing = (selected as any).freezing ?? "";
-
-      const body = {
-        service_id: selected.id,
-        service_name: selected.title,
-        price: priceValue,
-        visits,
-        freezing,
-        phone: phone.trim(),
-        email: email.trim()
-      };
-
-      const res = await fetch("/catalog/api-backend/api/purchase.php", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-      });
-
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(`HTTP ${res.status}: ${txt}`);
-      }
-
-      const json: PurchaseResponse = await res.json();
-      if (!json.ok) {
-        throw new Error(json.message || "Ошибка покупки");
-      }
-
-      setBuyStatus("success");
-      setBuyMessage(json.message || "Покупка успешно оформлена. Письмо отправлено на почту.");
-      if (json.voucher_url) setVoucherUrl(json.voucher_url);
-      // НЕ закрываем автоматически — пользователь закроет сам
-    } catch (err: any) {
-      setBuyStatus("error");
-      setBuyMessage(err.message || "Ошибка");
-    }
-  }
-
-  return (
-    <div className="catalog-root">
-      <header className="catalog-header">Каталог услуг</header>
-      <main className="catalog-main">
-        <h2 className="catalog-title">Каталог услуг</h2>
-
-        {loading && <div className="hint">Загрузка каталога…</div>}
-
-        {error && (
-          <div className="error">
-            Ошибка загрузки каталога: {error}
-            <div className="hint">Проверьте DevTools → Network и путь к API</div>
-          </div>
-        )}
-
-        {!loading && !error && (
-          <div className="cards-grid">
-            {services.map((s) => (
-              <article className="card" key={s.id}>
-                <div className="card-inner">
-                  <div>
-                    <h3 className="card-title">{s.title}</h3>
-                    <p className="text-sm text-slate-600 mt-1 line-clamp-2">
-                      {s.shortDescription}
-                    </p>
-
-                    <div style={{ marginTop: 12 }} className="mt-3 flex items-center justify-between">
-                      <div>
-                        <div style={{ fontWeight: 700, fontSize: 18 }}>
-                          {s.price?.currency}{s.price?.value}
-                        </div>
-                        <div style={{ fontSize: 12, color: "#6b7280" }}>{s.price?.unit}</div>
-                      </div>
-                      <div>
-                        <button className="btn-buy" onClick={() => openBuy(s)} aria-label={`Купить ${s.title}`}>
-                          КУПИТЬ
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </main>
-
-      {isPopupOpen && selected && (
-        <div className="popup-overlay" role="dialog" aria-modal="true">
-          <div className="popup">
-            <button className="popup-close" onClick={closePopup} aria-label="Закрыть">×</button>
-            <h3 className="popup-title">ПОКУПКА</h3>
-
-            <div className="popup-subtitle" style={{ marginBottom: 8 }}>
-              <div style={{ fontWeight: 700 }}>{selected.title}</div>
-              <div style={{ fontWeight: 700 }}>{selected.price?.currency}{selected.price?.value}</div>
-            </div>
-
-            <form onSubmit={submitBuy} className="popup-form">
-              <label>
-                Телефон
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  required
-                  placeholder="+7ХХХХХХХХХХ"
-                />
-              </label>
-
-              <label>
-                E-mail
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  placeholder="mail@example.com"
-                />
-              </label>
-
-              <button type="submit" className="popup-pay" disabled={buyStatus === "loading"}>
-                {buyStatus === "loading" ? "ОПЛАТА..." : "ОПЛАТИТЬ"}
-              </button>
-
-              {buyStatus === "error" && <div className="popup-error">{buyMessage}</div>}
-              {buyStatus === "success" && <div className="popup-success">{buyMessage}</div>}
-
-              {voucherUrl && (
-                <div style={{ textAlign: "center", marginTop: 12 }}>
-                  <a className="voucher-link" href={voucherUrl} target="_blank" rel="noreferrer">
-                    Скачать абонемент
-                  </a>
-                </div>
-              )}
-
-              <div className="popup-agreement">
-                Нажимая кнопку «Оплатить», вы даёте согласие на обработку своих персональных данных и соглашаетесь с «Публичной офертой»
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+// ---- helpers ----
+function respond(bool $ok, string $message = '', array $extra = []): void {
+    http_response_code($ok ? 200 : 400);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(array_merge(['ok' => $ok, 'message' => $message], $extra), JSON_UNESCAPED_UNICODE);
+    exit;
 }
+
+function uuid_v4(): string {
+    $data = random_bytes(16);
+    $data[6] = chr((ord($data[6]) & 0x0f) | 0x40);
+    $data[8] = chr((ord($data[8]) & 0x3f) | 0x80);
+    return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
+}
+
+function safe_getenv(string $key, string $fallback = ''): string {
+    $v = getenv($key);
+    if ($v !== false && $v !== null) {
+        return (string)$v;
+    }
+    if (array_key_exists($key, $_ENV) && $_ENV[$key] !== null) {
+        return (string)$_ENV[$key];
+    }
+    return $fallback;
+}
+
+function log_debug(string $msg): void {
+    $logPath = safe_getenv('LOG_PATH', __DIR__ . '/../../purchase.log');
+    @file_put_contents($logPath, '[' . date('c') . '] ' . $msg . PHP_EOL, FILE_APPEND | LOCK_EX);
+}
+
+// ---- load .env from /opt/catalog if present ----
+function load_env(): void {
+    $envPath = '/opt/catalog';
+    if (is_dir($envPath) && is_readable($envPath . '/.env')) {
+        try {
+            $dotenv = Dotenv::createImmutable($envPath);
+            $dotenv->safeLoad();
+        } catch (Throwable $e) {
+            // ignore
+        }
+        // ensure getenv() returns values from $_ENV
+        foreach ($_ENV as $k => $v) {
+            if ($v !== null && $v !== '') {
+                putenv("$k=$v");
+            }
+        }
+    }
+}
+load_env();
+
+// ---- read request ----
+$raw = file_get_contents('php://input') ?: '';
+$data = json_decode($raw, true);
+if (json_last_error() !== JSON_ERROR_NONE) {
+    respond(false, 'Invalid JSON body');
+}
+
+$serviceId = (string)($data['service_id'] ?? $data['serviceId'] ?? $data['id'] ?? '');
+$serviceName = (string)($data['service_name'] ?? $data['serviceName'] ?? '');
+$phone = (string)($data['phone'] ?? '');
+$email = (string)($data['email'] ?? '');
+$price = $data['price'] ?? null;
+$visits = $data['visits'] ?? null;
+$freezing = $data['freezing'] ?? null;
+
+if ($serviceId === '' || $phone === '' || $email === '') {
+    respond(false, 'Missing required fields (service_id, phone, email)');
+}
+
+// ---- load configuration from env (safe) ----
+$FASTSALE_ENDPOINT = safe_getenv('FASTSALE_ENDPOINT', safe_getenv('FASTSALES_ENDPOINT', ''));
+$CLUB_ID = safe_getenv('CLUB_ID', '');
+$PUBLIC_BASE = rtrim(safe_getenv('PUBLIC_BASE', ''), '/');
+$VOUCHERS_DIR = safe_getenv('VOUCHERS_DIR', __DIR__ . '/../../vouchers');
+$VOUCHER_SECRET = safe_getenv('VOUCHER_SECRET', safe_getenv('SECRET', 'please-change-me'));
+$API_USER_TOKEN = safe_getenv('API_USER_TOKEN', '');
+$API_KEY = safe_getenv('API_KEY', '');
+$BASIC_USER = safe_getenv('BASIC_USER', '');
+$BASIC_PASS = safe_getenv('BASIC_PASS', '');
+
+// SMTP
+$SMTP_HOST = safe_getenv('SMTP_HOST', '');
+$SMTP_PORT = intval(safe_getenv('SMTP_PORT', '0'));
+$SMTP_USER = safe_getenv('SMTP_USER', '');
+$SMTP_PASS = safe_getenv('SMTP_PASS', '');
+$SMTP_FROM = safe_getenv('SMTP_FROM', 'noreply@' . ($_SERVER['HTTP_HOST'] ?? 'localhost'));
+$SMTP_FROM_NAME = safe_getenv('SMTP_FROM_NAME', 'DVVS');
+
+if ($FASTSALE_ENDPOINT === '' || $CLUB_ID === '') {
+    respond(false, 'Server misconfigured (FASTSALE_ENDPOINT and CLUB_ID required)');
+}
+
+// ---- build docId and date ----
+$docId = uuid_v4();
+$date = (new DateTime('now', new DateTimeZone('Europe/Moscow')))->format('Y-m-d\TH:i:s');
+
+// ---- prepare request body for FastSales ----
+$normalizedPhone = preg_replace('/\D+/', '', $phone);
+$requestBody = [
+    'club_id' => $CLUB_ID,
+    'phone' => $normalizedPhone,
+    'email' => $email,
+    'sale' => [
+        'docId' => $docId,
+        'date' => $date,
+        'goods' => [
+            [
+                'code' => $serviceId,
+                'name' => $serviceName,
+                'price' => $price,
+                'qty' => 1,
+            ]
+        ]
+    ]
+];
+
+// ---- build headers to match Postman (usertoken, apikey, Basic auth) ----
+$headers = ['Content-Type: application/json'];
+if ($API_USER_TOKEN !== '') {
+    $headers[] = 'usertoken: ' . $API_USER_TOKEN;
+}
+if ($API_KEY !== '') {
+    $headers[] = 'apikey: ' . $API_KEY;
+}
+if ($BASIC_USER !== '' || $BASIC_PASS !== '') {
+    $headers[] = 'Authorization: Basic ' . base64_encode($BASIC_USER . ':' . $BASIC_PASS);
+}
+
+// ---- execute curl to FastSales ----
+$ch = curl_init($FASTSALE_ENDPOINT);
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+curl_setopt($ch, CURLOPT_POST, true);
+curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($requestBody, JSON_UNESCAPED_UNICODE));
+curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+$disableSslVerify = (bool)filter_var(safe_getenv('DISABLE_SSL_VERIFY', '0'), FILTER_VALIDATE_BOOLEAN);
+if ($disableSslVerify) {
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+}
+$response = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE) ?: 0;
+$curlErr = curl_error($ch) ?: '';
+curl_close($ch);
+
+// log request/response for debugging (do not keep secrets in logs long-term)
+log_debug('FastSales request to ' . $FASTSALE_ENDPOINT . ' headers=' . json_encode($headers));
+log_debug('FastSales request body=' . substr(json_encode($requestBody, JSON_UNESCAPED_UNICODE), 0, 2000));
+log_debug("FastSales response HTTP={$httpCode} curlErr={$curlErr} resp=" . substr((string)$response, 0, 4000));
+
+if ($response === false || $httpCode >= 400) {
+    $msg = $curlErr ?: ('HTTP ' . $httpCode);
+    error_log("FastSales error: http={$httpCode} curlErr={$curlErr} resp=" . substr((string)$response, 0, 500));
+    respond(false, 'FastSales error: ' . $msg);
+}
+
+// try parse response JSON if any
+$fastsalesResp = json_decode((string)$response, true);
+if (json_last_error() === JSON_ERROR_NONE && isset($fastsalesResp['ok']) && $fastsalesResp['ok'] === false) {
+    $fsMessage = $fastsalesResp['message'] ?? 'FastSales returned error';
+    respond(false, 'FastSales error: ' . $fsMessage, ['raw' => $fastsalesResp]);
+}
+
+// ---- create vouchers dir if missing ----
+if (!is_dir($VOUCHERS_DIR)) {
+    @mkdir($VOUCHERS_DIR, 0755, true);
+}
+$voucherFile = rtrim($VOUCHERS_DIR, '/') . '/' . $docId . '.pdf';
+
+// build public base
+if ($PUBLIC_BASE !== '') {
+    $publicBase = $PUBLIC_BASE;
+} else {
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? 'localhost');
+    $publicBase = $scheme . '://' . $host;
+}
+$publicVoucherUrl = rtrim($publicBase, '/') . '/catalog/api-backend/api/voucher.php?doc=' . urlencode($docId);
+
+// ---- prepare HTML template ----
+$templatePath = __DIR__ . '/voucher_template.html';
+$serviceEsc = htmlspecialchars($serviceName, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+if (is_readable($templatePath)) {
+    $html = file_get_contents($templatePath);
+} else {
+    $html = "<html><body><h1>Абонемент</h1><p>Документ: {$docId}</p><p>Услуга: {$serviceEsc}</p></body></html>";
+}
+
+// ---- generate QR as PNG data URI (public URL + phone param) ----
+$qrDataUri = '';
+try {
+    $qrPayload = $publicVoucherUrl . '&phone=' . urlencode($normalizedPhone);
+    // use chillerlan/php-qrcode if available (matches diff style)
+    $options = new QROptions([
+        'version'    => 5,
+        'outputType' => QRCode::OUTPUT_IMAGE_PNG,
+        'eccLevel'   => QRCode::ECC_L,
+        'imageBase64' => false,
+    ]);
+    $qrBin = (new QRCode($options))->render($qrPayload);
+    $qrDataUri = 'data:image/png;base64,' . base64_encode($qrBin);
+} catch (Throwable $e) {
+    $qrDataUri = '';
+    log_debug('QR generation error: ' . $e->getMessage());
+}
+
+// ---- embed logo if available ----
+$logoDataUri = '';
+$logoPathEnv = safe_getenv('VOUCHER_LOGO_PATH', '');
+if ($logoPathEnv && is_readable($logoPathEnv)) {
+    $logoBin = file_get_contents($logoPathEnv);
+    $ext = pathinfo($logoPathEnv, PATHINFO_EXTENSION) ?: 'png';
+    $logoDataUri = 'data:image/' . $ext . ';base64,' . base64_encode($logoBin);
+}
+
+// ---- replace placeholders in template ----
+$replacements = [
+    '{{logo_src}}' => $logoDataUri,
+    '{{service_name}}' => htmlspecialchars((string)$serviceName, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+    '{{price}}' => htmlspecialchars((string)$price, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+    '{{visits}}' => htmlspecialchars((string)$visits, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+    '{{freezing}}' => htmlspecialchars((string)$freezing, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+    '{{qr_code_data}}' => $qrDataUri,
+    '{{voucher_url}}' => htmlspecialchars($publicVoucherUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+];
+$html = strtr($html, $replacements);
+
+// ---- render PDF via mPDF ----
+$pdfCreated = false;
+try {
+    $tmpDir = safe_getenv('TMP_DIR', __DIR__ . '/../../tmp');
+    if (!is_dir($tmpDir)) @mkdir($tmpDir, 0755, true);
+    $mpdf = new Mpdf(['tempDir' => $tmpDir]);
+    $mpdf->SetTitle('Абонемент ' . $docId);
+    $mpdf->WriteHTML($html);
+    $mpdf->Output($voucherFile, \Mpdf\Output\Destination::FILE);
+    $pdfCreated = file_exists($voucherFile);
+} catch (Throwable $e) {
+    error_log('mPDF error: ' . $e->getMessage());
+    log_debug('mPDF error: ' . $e->getMessage());
+    $pdfCreated = false;
+}
+
+// ---- send email with voucher link (or attach) ----
+$mailSent = false;
+try {
+    $mail = new PHPMailer(true);
+
+    if ($SMTP_HOST !== '') {
+        $mail->isSMTP();
+        $mail->Host = $SMTP_HOST;
+        if ($SMTP_PORT > 0) $mail->Port = $SMTP_PORT;
+        if ($SMTP_USER !== '') {
+            $mail->SMTPAuth = true;
+            $mail->Username = $SMTP_USER;
+            $mail->Password = $SMTP_PASS;
+        }
+        $enc = strtolower(safe_getenv('SMTP_ENC', safe_getenv('MAIL_ENC', '')));
+        if (in_array($enc, ['ssl','smtps'], true)) {
+            $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
+        } elseif (in_array($enc, ['tls','starttls'], true)) {
+            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+        }
+        if ((bool)filter_var(safe_getenv('SMTP_ALLOW_SELF_SIGNED', '0'), FILTER_VALIDATE_BOOLEAN)) {
+            $mail->SMTPOptions = [
+                'ssl' => [
+                    'verify_peer' => false,
+                    'verify_peer_name' => false,
+                    'allow_self_signed' => true,
+                ]
+            ];
+        }
+    } else {
+        // fallback to mail()
+        $mail->isMail();
+    }
+
+    $mail->setFrom($SMTP_FROM, $SMTP_FROM_NAME);
+    $mail->addAddress($email);
+    $mail->Subject = 'Ваш абонемент';
+    $bodyHtml = "<p>Спасибо за покупку.</p><p>Ссылка на ваучер: <a href=\"" . htmlspecialchars($publicVoucherUrl) . "\">скачать</a></p>";
+    $mail->isHTML(true);
+    $mail->Body = $bodyHtml;
+    if ($pdfCreated && is_readable($voucherFile)) {
+        $mail->addAttachment($voucherFile, basename($voucherFile));
+    }
+    $mail->send();
+    $mailSent = true;
+} catch (MailException $e) {
+    error_log('PHPMailer error: ' . $e->getMessage());
+    log_debug('PHPMailer error: ' . $e->getMessage());
+    $mailSent = false;
+}
+
+// ---- simple order log ----
+$logLine = sprintf("[%s] doc=%s service=%s phone=%s email=%s fastsales_http=%d mail=%s\n",
+    date('Y-m-d H:i:s'), $docId, $serviceId, $normalizedPhone, $email, $httpCode, $mailSent ? 'ok' : 'no');
+@file_put_contents(safe_getenv('LOG_PATH', __DIR__ . '/../../purchase.log'), $logLine, FILE_APPEND | LOCK_EX);
+
+// ---- produce HMAC token for secure download ----
+$token = hash_hmac('sha256', $docId . '|' . $email, $VOUCHER_SECRET);
+
+// ---- final response ----
+$voucherPublicWithToken = $publicVoucherUrl . '&token=' . $token;
+respond(true, 'Покупка зарегистрирована', ['voucher_url' => $voucherPublicWithToken, 'doc' => $docId]);
