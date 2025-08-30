@@ -1,9 +1,11 @@
 <?php
 declare(strict_types=1);
 
-// purchase.php — актуализированная версия для QR только по номеру телефона и красивого pdf
+// purchase.php
 // Принимает JSON { service_id, phone, email, ... }
-// Вызывает FastSales, генерирует PDF (по шаблону), QR только с номером, сохраняет мета, отправляет письмо, нотифицирует внешнюю систему
+// Генерирует docId, вызывает FastSales API, генерирует PDF-ваучер (mPDF),
+// создаёт QR по public URL ваучера (с phone внутри ссылки),
+// отправляет письмо через SMTP (PHPMailer) и возвращает JSON { ok: true, voucher_url: ... }
 
 require __DIR__ . '/../../vendor/autoload.php';
 
@@ -11,6 +13,8 @@ use Dotenv\Dotenv;
 use Mpdf\Mpdf;
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception as MailException;
+
+// If chillerlan/php-qrcode is available (matches diff usage)
 use chillerlan\QRCode\QROptions;
 use chillerlan\QRCode\QRCode;
 
@@ -31,8 +35,12 @@ function uuid_v4(): string {
 
 function safe_getenv(string $key, string $fallback = ''): string {
     $v = getenv($key);
-    if ($v !== false && $v !== null) return (string)$v;
-    if (array_key_exists($key, $_ENV) && $_ENV[$key] !== null) return (string)$_ENV[$key];
+    if ($v !== false && $v !== null) {
+        return (string)$v;
+    }
+    if (array_key_exists($key, $_ENV) && $_ENV[$key] !== null) {
+        return (string)$_ENV[$key];
+    }
     return $fallback;
 }
 
@@ -48,9 +56,14 @@ function load_env(): void {
         try {
             $dotenv = Dotenv::createImmutable($envPath);
             $dotenv->safeLoad();
-        } catch (Throwable $e) {}
+        } catch (Throwable $e) {
+            // ignore
+        }
+        // ensure getenv() returns values from $_ENV
         foreach ($_ENV as $k => $v) {
-            if ($v !== null && $v !== '') putenv("$k=$v");
+            if ($v !== null && $v !== '') {
+                putenv("$k=$v");
+            }
         }
     }
 }
@@ -94,10 +107,6 @@ $SMTP_PASS = safe_getenv('SMTP_PASS', '');
 $SMTP_FROM = safe_getenv('SMTP_FROM', 'noreply@' . ($_SERVER['HTTP_HOST'] ?? 'localhost'));
 $SMTP_FROM_NAME = safe_getenv('SMTP_FROM_NAME', 'DVVS');
 
-// External notify (optional)
-$EXTERNAL_NOTIFY_URL = safe_getenv('EXTERNAL_NOTIFY_URL', '');
-$EXTERNAL_NOTIFY_AUTH = safe_getenv('EXTERNAL_NOTIFY_AUTH', ''); // e.g. "Bearer xxxxx" or "Basic abc"
-
 if ($FASTSALE_ENDPOINT === '' || $CLUB_ID === '') {
     respond(false, 'Server misconfigured (FASTSALE_ENDPOINT and CLUB_ID required)');
 }
@@ -128,8 +137,12 @@ $requestBody = [
 
 // ---- build headers to match Postman (usertoken, apikey, Basic auth) ----
 $headers = ['Content-Type: application/json'];
-if ($API_USER_TOKEN !== '') $headers[] = 'usertoken: ' . $API_USER_TOKEN;
-if ($API_KEY !== '') $headers[] = 'apikey: ' . $API_KEY;
+if ($API_USER_TOKEN !== '') {
+    $headers[] = 'usertoken: ' . $API_USER_TOKEN;
+}
+if ($API_KEY !== '') {
+    $headers[] = 'apikey: ' . $API_KEY;
+}
 if ($BASIC_USER !== '' || $BASIC_PASS !== '') {
     $headers[] = 'Authorization: Basic ' . base64_encode($BASIC_USER . ':' . $BASIC_PASS);
 }
@@ -163,6 +176,7 @@ if ($response === false || $httpCode >= 400) {
     respond(false, 'FastSales error: ' . $msg);
 }
 
+// try parse response JSON if any
 $fastsalesResp = json_decode((string)$response, true);
 if (json_last_error() === JSON_ERROR_NONE && isset($fastsalesResp['ok']) && $fastsalesResp['ok'] === false) {
     $fsMessage = $fastsalesResp['message'] ?? 'FastSales returned error';
@@ -170,10 +184,12 @@ if (json_last_error() === JSON_ERROR_NONE && isset($fastsalesResp['ok']) && $fas
 }
 
 // ---- create vouchers dir if missing ----
-if (!is_dir($VOUCHERS_DIR)) @mkdir($VOUCHERS_DIR, 0755, true);
+if (!is_dir($VOUCHERS_DIR)) {
+    @mkdir($VOUCHERS_DIR, 0755, true);
+}
 $voucherFile = rtrim($VOUCHERS_DIR, '/') . '/' . $docId . '.pdf';
 
-// ---- build public base + voucher public url (voucher.php will validate token) ----
+// build public base
 if ($PUBLIC_BASE !== '') {
     $publicBase = $PUBLIC_BASE;
 } else {
@@ -181,27 +197,27 @@ if ($PUBLIC_BASE !== '') {
     $host = $_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? 'localhost');
     $publicBase = $scheme . '://' . $host;
 }
-$publicVoucherUrlBase = rtrim($publicBase, '/') . '/catalog/api-backend/api/voucher.php?doc=' . urlencode($docId);
+$publicVoucherUrl = rtrim($publicBase, '/') . '/catalog/api-backend/api/voucher.php?doc=' . urlencode($docId);
 
 // ---- prepare HTML template ----
-$templatePath = __DIR__ . '/../templates/voucher_mpdf.html';
+$templatePath = __DIR__ . '/voucher_template.html';
 $serviceEsc = htmlspecialchars($serviceName, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-
 if (is_readable($templatePath)) {
-    $htmlTpl = file_get_contents($templatePath);
+    $html = file_get_contents($templatePath);
 } else {
-    $htmlTpl = "<html><body><h1>Абонемент</h1><p>Документ: {{docId}}</p><p>Услуга: {{service_name}}</p></body></html>";
+    $html = "<html><body><h1>Абонемент</h1><p>Документ: {$docId}</p><p>Услуга: {$serviceEsc}</p></body></html>";
 }
 
-// ---- generate QR ONLY by phone ----
+// ---- generate QR as PNG data URI (public URL + phone param) ----
 $qrDataUri = '';
 try {
-    $qrPayload = $normalizedPhone; // Только номер телефона!
+    $qrPayload = $publicVoucherUrl . '&phone=' . urlencode($normalizedPhone);
+    // use chillerlan/php-qrcode if available (matches diff style)
     $options = new QROptions([
-        'version'=>5,
-        'outputType'=>QRCode::OUTPUT_IMAGE_PNG,
-        'eccLevel'=>QRCode::ECC_L,
-        'imageBase64'=>false
+        'version'    => 5,
+        'outputType' => QRCode::OUTPUT_IMAGE_PNG,
+        'eccLevel'   => QRCode::ECC_L,
+        'imageBase64' => false,
     ]);
     $qrBin = (new QRCode($options))->render($qrPayload);
     $qrDataUri = 'data:image/png;base64,' . base64_encode($qrBin);
@@ -222,19 +238,14 @@ if ($logoPathEnv && is_readable($logoPathEnv)) {
 // ---- replace placeholders in template ----
 $replacements = [
     '{{logo_src}}' => $logoDataUri,
-    '{{docId}}' => htmlspecialchars($docId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
-    '{{date}}' => htmlspecialchars($date, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
-    '{{service_name}}' => $serviceEsc,
+    '{{service_name}}' => htmlspecialchars((string)$serviceName, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
     '{{price}}' => htmlspecialchars((string)$price, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
     '{{visits}}' => htmlspecialchars((string)$visits, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
     '{{freezing}}' => htmlspecialchars((string)$freezing, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
-    '{{phone}}' => htmlspecialchars($phone, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
-    '{{email}}' => htmlspecialchars($email, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
     '{{qr_code_data}}' => $qrDataUri,
-    '{{voucher_url}}' => htmlspecialchars($publicVoucherUrlBase, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+    '{{voucher_url}}' => htmlspecialchars($publicVoucherUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
 ];
-
-$voucherHtml = strtr($htmlTpl, $replacements);
+$html = strtr($html, $replacements);
 
 // ---- render PDF via mPDF ----
 $pdfCreated = false;
@@ -243,7 +254,7 @@ try {
     if (!is_dir($tmpDir)) @mkdir($tmpDir, 0755, true);
     $mpdf = new Mpdf(['tempDir' => $tmpDir]);
     $mpdf->SetTitle('Абонемент ' . $docId);
-    $mpdf->WriteHTML($voucherHtml);
+    $mpdf->WriteHTML($html);
     $mpdf->Output($voucherFile, \Mpdf\Output\Destination::FILE);
     $pdfCreated = file_exists($voucherFile);
 } catch (Throwable $e) {
@@ -251,23 +262,6 @@ try {
     log_debug('mPDF error: ' . $e->getMessage());
     $pdfCreated = false;
 }
-
-// ---- Save metadata for voucher verification ----
-$metaPath = rtrim($VOUCHERS_DIR, '/') . '/' . $docId . '.json';
-$metaContent = json_encode([
-    'doc' => $docId,
-    'email' => $email,
-    'phone' => $normalizedPhone,
-    'service' => $serviceId,
-    'price' => $price,
-    'created' => date('c')
-], JSON_UNESCAPED_UNICODE);
-@file_put_contents($metaPath, $metaContent, LOCK_EX);
-@chmod($metaPath, 0644);
-
-// ---- prepare token and public url with token ----
-$token = hash_hmac('sha256', $docId . '|' . $email, $VOUCHER_SECRET);
-$voucherPublicWithToken = $publicVoucherUrlBase . '&token=' . $token;
 
 // ---- send email with voucher link (or attach) ----
 $mailSent = false;
@@ -299,26 +293,19 @@ try {
             ];
         }
     } else {
+        // fallback to mail()
         $mail->isMail();
     }
 
-    // nice HTML body
-    $mailBody = '<p>Здравствуйте!</p>';
-    $mailBody .= '<p>Спасибо за покупку: <strong>' . htmlspecialchars($serviceName) . '</strong></p>';
-    $mailBody .= '<p>Документ: <strong>' . htmlspecialchars($docId) . '</strong></p>';
-    $mailBody .= '<p>Ссылка для скачивания ваучера: <a href="' . htmlspecialchars($voucherPublicWithToken) . '">скачать ваучер</a></p>';
-    $mailBody .= '<p>Если у вас возникают проблемы, свяжитесь с поддержкой.</p>';
-
     $mail->setFrom($SMTP_FROM, $SMTP_FROM_NAME);
     $mail->addAddress($email);
-    $mail->Subject = 'Ваш абонемент — ' . htmlspecialchars($serviceName);
+    $mail->Subject = 'Ваш абонемент';
+    $bodyHtml = "<p>Спасибо за покупку.</p><p>Ссылка на ваучер: <a href=\"" . htmlspecialchars($publicVoucherUrl) . "\">скачать</a></p>";
     $mail->isHTML(true);
-    $mail->Body = $mailBody;
-
+    $mail->Body = $bodyHtml;
     if ($pdfCreated && is_readable($voucherFile)) {
-        $mail->addAttachment($voucherFile, 'abonement-' . $docId . '.pdf');
+        $mail->addAttachment($voucherFile, basename($voucherFile));
     }
-
     $mail->send();
     $mailSent = true;
 } catch (MailException $e) {
@@ -327,37 +314,14 @@ try {
     $mailSent = false;
 }
 
-// ---- log ----
+// ---- simple order log ----
 $logLine = sprintf("[%s] doc=%s service=%s phone=%s email=%s fastsales_http=%d mail=%s\n",
     date('Y-m-d H:i:s'), $docId, $serviceId, $normalizedPhone, $email, $httpCode, $mailSent ? 'ok' : 'no');
 @file_put_contents(safe_getenv('LOG_PATH', __DIR__ . '/../../purchase.log'), $logLine, FILE_APPEND | LOCK_EX);
 
-// ---- optional: notify external system of purchase ----
-if ($EXTERNAL_NOTIFY_URL !== '') {
-    $notifyPayload = [
-        'doc' => $docId,
-        'service_id' => $serviceId,
-        'service_name' => $serviceName,
-        'phone' => $normalizedPhone,
-        'email' => $email,
-        'price' => $price,
-        'voucher_url' => $voucherPublicWithToken,
-        'fastsales_http' => $httpCode,
-    ];
-    $nc = curl_init($EXTERNAL_NOTIFY_URL);
-    curl_setopt($nc, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($nc, CURLOPT_POST, true);
-    curl_setopt($nc, CURLOPT_POSTFIELDS, json_encode($notifyPayload, JSON_UNESCAPED_UNICODE));
-    $nheaders = ['Content-Type: application/json'];
-    if ($EXTERNAL_NOTIFY_AUTH !== '') $nheaders[] = 'Authorization: ' . $EXTERNAL_NOTIFY_AUTH;
-    curl_setopt($nc, CURLOPT_HTTPHEADER, $nheaders);
-    curl_setopt($nc, CURLOPT_TIMEOUT, 10);
-    $notifyResp = curl_exec($nc);
-    $notifyCode = curl_getinfo($nc, CURLINFO_HTTP_CODE) ?: 0;
-    $notifyErr = curl_error($nc) ?: '';
-    curl_close($nc);
-    log_debug("External notify to {$EXTERNAL_NOTIFY_URL} HTTP={$notifyCode} err={$notifyErr} resp=" . substr((string)$notifyResp,0,400));
-}
+// ---- produce HMAC token for secure download ----
+$token = hash_hmac('sha256', $docId . '|' . $email, $VOUCHER_SECRET);
 
 // ---- final response ----
+$voucherPublicWithToken = $publicVoucherUrl . '&token=' . $token;
 respond(true, 'Покупка зарегистрирована', ['voucher_url' => $voucherPublicWithToken, 'doc' => $docId]);
