@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Абонемент</title>
+  <style>
+    @page { margin: 18mm 12mm; }
+    body { font-family: "DejaVu Sans", "Helvetica", Arial, sans-serif; color:#222; font-size:13px; }
+    .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+    .logo img { height:56px; }
+    .brand { font-weight:700; font-size:18px; color:#1f2937; }
+    .doc { text-align:right; font-size:12px; color:#6b7280; }
+    .card { border:1px solid #e6e9ef; border-radius:10px; padding:16px; display:flex; gap:14px; }
+    .info { flex:1; }
+    .service-title { font-size:20px; font-weight:800; margin-bottom:8px; }
+    .meta { color:#54616a; font-size:13px; margin-bottom:10px; }
+    .price { font-size:30px; font-weight:800; color:#111827; margin-top:12px; }
+    .right { width:200px; text-align:center; }
+    .qr { width:170px; height:170px; object-fit:contain; border-radius:6px; box-shadow:0 6px 18px rgba(16,24,40,0.06); }
+    .voucher-badge { display:inline-block; margin-top:10px; padding:8px 12px; border-radius:20px; background:linear-gradient(90deg,#ff58c6,#6a4bff); color:#fff; font-weight:700; text-decoration:none; }
+    .footer { margin-top:14px; font-size:12px; color:#55606a; border-top:1px dashed #e6e9ef; padding-top:10px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">
+      <img src="{{logo_src}}" alt="logo" />
+      <div class="brand">Дворец водных видов спорта<br/><span style="font-weight:600;font-size:12px;color:#6b7280;">г. Екатеринбург</span></div>
+    </div>
+    <div class="doc">
+      Документ: <strong>{{docId}}</strong><br/>Дата: {{date}}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="info">
+      <div class="service-title">{{service_name}}</div>
+      <div class="meta">
+        <div>Количество посещений: <strong>{{visits}}</strong></div>
+        <div>Дней заморозки: <strong>{{freezing}}</strong></div>
+      </div>
+      <div class="price">{{price}} ₽</div>
+      <div style="margin-top:10px;font-size:12px;color:#475569;">Телефон: {{phone}}<br/>E-mail: {{email}}</div>
+    </div>
+
+    <div class="right">
+      <img class="qr" src="{{qr_code_data}}" alt="QR" />
+      <div><a class="voucher-badge" href="{{voucher_url}}">Открыть ваучер</a></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    Этот абонемент предназначен для индивидуального использования. По вопросам звоните +7 (343) 222-22-33.
+  </div>
+</body>
+</html>

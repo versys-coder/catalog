@@ -1,0 +1,122 @@
+[
+  {
+    "id": 1,
+    "title": "8 занятий / 1 месяц - тариф дневной",
+    "sessions": 8,
+    "duration_months": 1,
+    "plan": "дневной",
+    "visits": 8,
+    "freeze_days": 0,
+    "price_rub": 4320,
+    "price": "4320 ₽",
+    "image": "/catalog/dist/assets/plan-8-day.jpg"
+  },
+  {
+    "id": 2,
+    "title": "8 занятий / 1 месяц - тариф полного дня",
+    "sessions": 8,
+    "duration_months": 1,
+    "plan": "полного дня",
+    "visits": 8,
+    "freeze_days": 0,
+    "price_rub": 4680,
+    "price": "4680 ₽",
+    "image": "/catalog/dist/assets/plan-8-full.jpg"
+  },
+  {
+    "id": 3,
+    "title": "12 занятий / 2 месяца - тариф дневной",
+    "sessions": 12,
+    "duration_months": 2,
+    "plan": "дневной",
+    "visits": 12,
+    "freeze_days": 0,
+    "price_rub": 6480,
+    "price": "6480 ₽",
+    "image": "/catalog/dist/assets/plan-12-day.jpg"
+  },
+  {
+    "id": 4,
+    "title": "12 занятий / 2 месяца - тариф полного дня",
+    "sessions": 12,
+    "duration_months": 2,
+    "plan": "полного дня",
+    "visits": 12,
+    "freeze_days": 0,
+    "price_rub": 7020,
+    "price": "7020 ₽",
+    "image": "/catalog/dist/assets/plan-12-full.jpg"
+  },
+  {
+    "id": 5,
+    "title": "24 занятий / 3 месяца - тариф дневной",
+    "sessions": 24,
+    "duration_months": 3,
+    "plan": "дневной",
+    "visits": 24,
+    "freeze_days": 7,
+    "price_rub": 12960,
+    "price": "12960 ₽",
+    "image": "/catalog/dist/assets/plan-24-day.jpg"
+  },
+  {
+    "id": 6,
+    "title": "24 занятий / 3 месяца - тариф полного дня",
+    "sessions": 24,
+    "duration_months": 3,
+    "plan": "полного дня",
+    "visits": 24,
+    "freeze_days": 7,
+    "price_rub": 14040,
+    "price": "14040 ₽",
+    "image": "/catalog/dist/assets/plan-24-full.jpg"
+  },
+  {
+    "id": 7,
+    "title": "48 занятий / 6 месяцев - тариф дневной",
+    "sessions": 48,
+    "duration_months": 6,
+    "plan": "дневной",
+    "visits": 48,
+    "freeze_days": 15,
+    "price_rub": 25920,
+    "price": "25920 ₽",
+    "image": "/catalog/dist/assets/plan-48-day.jpg"
+  },
+  {
+    "id": 8,
+    "title": "48 занятий / 6 месяцев - тариф полного дня",
+    "sessions": 48,
+    "duration_months": 6,
+    "plan": "полного дня",
+    "visits": 48,
+    "freeze_days": 15,
+    "price_rub": 28080,
+    "price": "28080 ₽",
+    "image": "/catalog/dist/assets/plan-48-full.jpg"
+  },
+  {
+    "id": 9,
+    "title": "96 занятий / 12 месяцев - тариф дневной",
+    "sessions": 96,
+    "duration_months": 12,
+    "plan": "дневной",
+    "visits": 96,
+    "freeze_days": 30,
+    "price_rub": 51840,
+    "price": "51840 ₽",
+    "image": "/catalog/dist/assets/plan-96-day.jpg"
+  },
+  {
+    "id": 10,
+    "title": "96 занятий / 12 месяцев - тариф полного дня",
+    "sessions": 96,
+    "duration_months": 12,
+    "plan": "полного дня",
+    "visits": 96,
+    "freeze_days": 30,
+    "price_rub": 56160,
+    "price": "56160 ₽",
+    "image": "/catalog/dist/assets/plan-96-full.jpg"
+  }
+]
