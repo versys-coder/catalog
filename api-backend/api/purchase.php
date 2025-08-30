@@ -36,15 +36,14 @@ function load_env(): void {
     if (is_dir($envPath) && is_readable($envPath . '/.env')) {
         $dotenv = Dotenv::createImmutable($envPath);
         $dotenv->safeLoad();
+        // Важно! Прокидываем переменные из $_ENV в окружение сервера, чтобы getenv() возвращал их
+        foreach ($_ENV as $k => $v) {
+            putenv("$k=$v");
+        }
     }
     // else: ничего, возможно переменные среды есть в окружении сервера
 }
 load_env();
-error_log('DEBUG FASTSALE_ENDPOINT: ' . getenv('FASTSALE_ENDPOINT'));
-error_log('DEBUG CLUB_ID: ' . getenv('CLUB_ID'));
-error_log('DEBUG getenv FASTSALE_ENDPOINT: ' . getenv('FASTSALE_ENDPOINT'));
-error_log('DEBUG _ENV FASTSALE_ENDPOINT: ' . ($_ENV['FASTSALE_ENDPOINT'] ?? ''));
-error_log('DEBUG _SERVER FASTSALE_ENDPOINT: ' . ($_SERVER['FASTSALE_ENDPOINT'] ?? ''));
 
 // ---- read request ----
 $raw = file_get_contents('php://input');
