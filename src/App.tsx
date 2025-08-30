@@ -112,7 +112,7 @@ export default function App() {
       }
 
       // Закрыть popup через пару секунд
-      setTimeout(closePopup, 2000);
+      //setTimeout(closePopup, 12000);
     } catch (err: any) {
       setBuyStatus("error");
       setBuyMessage(err.message || "Ошибка");
