@@ -63,15 +63,16 @@ export default function App() {
           id: String(it.id ?? it.ID ?? it.code ?? it.name ?? Math.random()),
           title: it.title ?? it.name ?? it.service_name ?? it.caption ?? "",
           shortDescription: it.shortDescription ?? it.description ?? it.desc ?? "",
-          price: typeof it.price === "object"
-            ? {
-                value: Number(it.price.value ?? it.price.sum ?? it.price.summ ?? 0) || 0,
-                currency: it.price.currency ?? "₽",
-                unit: it.price.unit ?? ""
-              }
-            : { value: Number(it.price ?? it.summ ?? it.cost ?? 0), currency: "₽", unit: "" },
+          price:
+            typeof it.price === "object"
+              ? {
+                  value: Number(it.price.value ?? it.price.sum ?? it.price.summ ?? 0) || 0,
+                  currency: it.price.currency ?? "₽",
+                  unit: it.price.unit ?? ""
+                }
+              : { value: Number(it.price ?? it.summ ?? it.cost ?? 0), currency: "₽", unit: "" },
           duration: it.duration ?? it.visits,
-          tags: Array.isArray(it.tags) ? it.tags : (typeof it.tags === "string" ? [it.tags] : undefined),
+          tags: Array.isArray(it.tags) ? it.tags : typeof it.tags === "string" ? [it.tags] : undefined,
           imageUrl: it.imageUrl ?? it.image ?? it.img ?? "",
           bookingUrl: it.bookingUrl ?? it.booking_url ?? it.href ?? "#",
           highlight: Boolean(it.highlight ?? it.popular ?? false)
@@ -91,7 +92,9 @@ export default function App() {
     }
 
     load();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   function openBuy(service: Service) {
@@ -158,16 +161,18 @@ export default function App() {
       }
 
       setBuyStatus("success");
-      setBuyMessage("Открылось окно оплаты Альфа‑Банка. После успешной оплаты вас вернёт на сайт, и ваучер придёт на почту.");
+      setBuyMessage(
+        "Открылось окно оплаты Альфа‑Банка. После успешной оплаты вас вернёт на сайт, и ваучер придёт на почту."
+      );
       setPayFormUrl(json.formUrl);
 
       // Попробуем открыть окно оплаты
-      const w = 520, h = 760;
-      const y = window.top.outerHeight/2 + window.top.screenY - ( h/2);
-      const x = window.top.outerWidth/2 + window.top.screenX - ( w/2);
+      const w = 520;
+      const h = 760;
+      const y = window.outerHeight / 2 + window.screenY - h / 2;
+      const x = window.outerWidth / 2 + window.screenX - w / 2;
       const win = window.open(json.formUrl, "alfaPay", `popup=yes,width=${w},height=${h},left=${x},top=${y}`);
       if (!win) {
-        // Если браузер заблокировал попап — показываем ссылку
         setBuyMessage("Ваш браузер заблокировал всплывающее окно. Нажмите «Открыть оплату» ниже.");
       }
     } catch (err: any) {
@@ -198,13 +203,12 @@ export default function App() {
                 <div className="card-inner">
                   <div>
                     <h3 className="card-title">{s.title}</h3>
-                    <p className="text-sm text-slate-600 mt-1 line-clamp-2">
-                      {s.shortDescription}
-                    </p>
+                    <p className="text-sm text-slate-600 mt-1 line-clamp-2">{s.shortDescription}</p>
                     <div style={{ marginTop: 12 }} className="mt-3 flex items-center justify-between">
                       <div>
                         <div style={{ fontWeight: 700, fontSize: 18 }}>
-                          {s.price?.currency}{s.price?.value}
+                          {s.price?.currency}
+                          {s.price?.value}
                         </div>
                         <div style={{ fontSize: 12, color: "#6b7280" }}>{s.price?.unit}</div>
                       </div>
@@ -225,16 +229,21 @@ export default function App() {
       {isPopupOpen && selected && (
         <div className="popup-overlay" role="dialog" aria-modal="true">
           <div className="popup">
-            <button className="popup-close" onClick={closePopup} aria-label="Закрыть">×</button>
+            <button className="popup-close" onClick={closePopup} aria-label="Закрыть">
+              ×
+            </button>
             <h3 className="popup-title">ОПЛАТА</h3>
             <div className="popup-subtitle" style={{ marginBottom: 8 }}>
               <div style={{ fontWeight: 700 }}>{selected.title}</div>
-              <div style={{ fontWeight: 700 }}>{selected.price?.currency}{selected.price?.value}</div>
+              <div style={{ fontWeight: 700 }}>
+                {selected.price?.currency}
+                {selected.price?.value}
+              </div>
             </div>
             <form onSubmit={submitBuy} className="popup-form">
               <div style={{ marginBottom: 8, fontSize: 14, color: "#374151" }}>
-                Оплата будет выполнена на защищённой странице Альфа‑Банка.
-                После успешной оплаты вас вернёт на сайт и автоматически сформируется ваучер.
+                Оплата будет выполнена на защищённой странице Альфа‑Банка. После успешной оплаты вас вернёт на сайт и
+                автоматически сформируется ваучер.
               </div>
               <label>
                 Телефон
