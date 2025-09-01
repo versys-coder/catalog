@@ -36,7 +36,7 @@ export default function App() {
   const [buyMessage, setBuyMessage] = useState("");
   const [voucherUrl, setVoucherUrl] = useState<string | null>(null);
 
-  // При загрузке страницы — если вернулись из банка, читаем localStorage и открываем попап с результатом
+  // При возврате из банка: читаем результат и показываем попап
   useEffect(() => {
     try {
       const saved = localStorage.getItem("alfaPaymentResult");
@@ -46,25 +46,20 @@ export default function App() {
         setBuyStatus(r.ok ? "success" : "error");
         setBuyMessage(r.message || (r.ok ? "Оплата прошла" : "Оплата не подтверждена"));
         if (r.voucher_url) setVoucherUrl(r.voucher_url);
-        // Пытаемся подтянуть сервис из "ожидаемой оплаты"
         const pending = localStorage.getItem("alfaPending");
         if (pending) {
           const p = JSON.parse(pending);
           if (p && p.service) setSelected(p.service);
         }
-        // Очистим маркеры
         localStorage.removeItem("alfaPaymentResult");
         localStorage.removeItem("alfaPending");
       }
-    } catch (e) {
-      // ignore
-    }
+    } catch {}
   }, []);
 
-  // Загрузка каталога из API
+  // Загрузка каталога
   useEffect(() => {
     let mounted = true;
-
     async function load() {
       setLoading(true);
       setError(null);
@@ -115,11 +110,8 @@ export default function App() {
         }
       }
     }
-
     load();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
 
   function openBuy(service: Service) {
@@ -185,24 +177,17 @@ export default function App() {
         throw new Error(json.message || "Ошибка регистрации оплаты");
       }
 
-      // Сохраним "ожидаемую оплату", чтобы после возврата восстановить попап
+      // Сохраняем ожидаемую оплату
       try {
-        localStorage.setItem(
-          "alfaPending",
-          JSON.stringify({
-            orderId: json.orderId,
-            orderNumber: json.orderNumber,
-            ts: Date.now(),
-            service: {
-              id: selected.id,
-              title: selected.title,
-              price: selected.price
-            }
-          })
-        );
-      } catch (e) {}
+        localStorage.setItem("alfaPending", JSON.stringify({
+          orderId: json.orderId,
+          orderNumber: json.orderNumber,
+          ts: Date.now(),
+          service: { id: selected.id, title: selected.title, price: selected.price }
+        }));
+      } catch {}
 
-      // Полная навигация на страницу оплаты Альфы
+      // Полный переход на страницу оплаты Альфы
       window.location.assign(json.formUrl);
     } catch (err: any) {
       setBuyStatus("error");
@@ -236,8 +221,7 @@ export default function App() {
                     <div style={{ marginTop: 12 }} className="mt-3 flex items-center justify-between">
                       <div>
                         <div style={{ fontWeight: 700, fontSize: 18 }}>
-                          {s.price?.currency}
-                          {s.price?.value}
+                          {s.price?.currency}{s.price?.value}
                         </div>
                         <div style={{ fontSize: 12, color: "#6b7280" }}>{s.price?.unit}</div>
                       </div>
@@ -258,22 +242,16 @@ export default function App() {
       {isPopupOpen && (
         <div className="popup-overlay" role="dialog" aria-modal="true">
           <div className="popup">
-            <button className="popup-close" onClick={closePopup} aria-label="Закрыть">
-              ×
-            </button>
+            <button className="popup-close" onClick={closePopup} aria-label="Закрыть">×</button>
             <h3 className="popup-title">ОПЛАТА</h3>
 
             {selected && (
               <div className="popup-subtitle" style={{ marginBottom: 8 }}>
                 <div style={{ fontWeight: 700 }}>{selected.title}</div>
-                <div style={{ fontWeight: 700 }}>
-                  {selected.price?.currency}
-                  {selected.price?.value}
-                </div>
+                <div style={{ fontWeight: 700 }}>{selected.price?.currency}{selected.price?.value}</div>
               </div>
             )}
 
-            {/* Если ваучер уже готов (вернулись из банка) — показываем результат */}
             {voucherUrl ? (
               <div>
                 <div className="popup-success" style={{ marginBottom: 12 }}>
@@ -286,7 +264,6 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              // Иначе — форма для отправки на оплату
               <form onSubmit={submitBuy} className="popup-form">
                 <div style={{ marginBottom: 8, fontSize: 14, color: "#374151" }}>
                   После нажатия кнопки вы перейдёте на защищённую страницу Альфа‑Банка. После оплаты мы вернём вас
@@ -294,31 +271,17 @@ export default function App() {
                 </div>
                 <label>
                   Телефон
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    required
-                    placeholder="+7ХХХХХХХХХХ"
-                  />
+                  <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} required placeholder="+7ХХХХХХХХХХ" />
                 </label>
                 <label>
                   E-mail
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    placeholder="mail@example.com"
-                  />
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="mail@example.com" />
                 </label>
                 <button type="submit" className="popup-pay" disabled={buyStatus === "loading"}>
                   {buyStatus === "loading" ? "ПЕРЕХОД К ОПЛАТЕ…" : "ОПЛАТИТЬ КАРТОЙ"}
                 </button>
-
                 {buyStatus === "error" && <div className="popup-error">{buyMessage}</div>}
                 {buyStatus === "success" && !voucherUrl && <div className="popup-success">{buyMessage}</div>}
-
                 <div className="popup-agreement">
                   Нажимая кнопку «Оплатить», вы соглашаетесь с условиями оферты и обработкой персональных данных.
                 </div>

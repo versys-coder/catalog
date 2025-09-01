@@ -88,11 +88,9 @@ if ($DEFAULT_RETURN_URL === '' || stripos($DEFAULT_RETURN_URL, 'yourdomain') !==
 // Куда возвращаться в браузере после оплаты
 $backUrl = $backUrlIn;
 if ($backUrl === '') {
-    // Пробуем взять Referer
     $ref = (string)($_SERVER['HTTP_REFERER'] ?? '');
     if ($ref !== '') $backUrl = $ref;
 }
-// Если совсем пусто — вернёмся на каталог по умолчанию
 if ($backUrl === '') {
     $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
     $host   = $_SERVER['HTTP_HOST'] ?? 'localhost';
@@ -103,7 +101,7 @@ if ($backUrl === '') {
 $returnUrl = $DEFAULT_RETURN_URL . (strpos($DEFAULT_RETURN_URL, '?') === false ? '?' : '&') . 'back=' . rawurlencode($backUrl);
 
 // Проверка наличия кредов
-$hasToken = ($ALFA_TOKEN !== '');
+$hasToken    = ($ALFA_TOKEN !== '');
 $hasUserPass = ($ALFA_USER !== '' && $ALFA_PASS !== '');
 if (!$hasToken && !$hasUserPass) {
     $hint = 'Server misconfigured: ALFA_TOKEN or ALFA_USER/ALFA_PASS not set. '
@@ -129,7 +127,6 @@ $fields = [
     'language'    => 'ru',
     'orderNumber' => $orderNumber,
     'returnUrl'   => $returnUrl,
-    // 'features' => 'AUTO_PAYMENT',
 ];
 if ($hasToken) {
     $fields['token'] = $ALFA_TOKEN;
@@ -137,9 +134,7 @@ if ($hasToken) {
     $fields['userName'] = $ALFA_USER;
     $fields['password'] = $ALFA_PASS;
 }
-if ($ALFA_CLIENT_ID !== '') {
-    $fields['clientId'] = $ALFA_CLIENT_ID;
-}
+if ($ALFA_CLIENT_ID !== '') $fields['clientId'] = $ALFA_CLIENT_ID;
 
 $url = $ALFA_BASE_URL . '/rest/register.do';
 $ch = curl_init($url);
