@@ -3,58 +3,140 @@
 <head>
 <meta charset="utf-8"/>
 <style>
-  /* Цвета и стиль, подобранные под ваш сайт (фиолет → малиновый градиент) */
-  :root{
-    --accent-start: #9b3cf0;    /* фиолет */
-    --accent-end:   #e13db7;    /* малиновый */
-    --accent-dark:  #6a2bb0;
-    --muted: #6b7280;
-    --card-border: rgba(255,255,255,0.08);
-    --bg: #fbfbfe;
-    --success: #16a34a;
+  /* Цвета и стиль, совместимые с mPDF (без CSS-переменных и сложных фич) */
+  body {
+    font-family: DejaVu Sans, Arial, sans-serif;
+    color: #222;
+    margin: 0;
+    background: #fbfbfe;
   }
-
-  body{font-family: DejaVu Sans, Arial, sans-serif; color:#222; margin:0; background:var(--bg);}
-  .page{padding:28px; max-width:900px; margin:0 auto;}
-  .header{
-    display:flex; align-items:center; justify-content:space-between;
-    padding:12px 18px; border-radius:10px;
-    background: linear-gradient(90deg, var(--accent-start), var(--accent-end));
+  .page {
+    padding: 28px;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  .header {
+    /* mPDF не поддерживает flex, используем блочную верстку */
+    width: 100%;
+    padding: 12px 18px;
+    border-radius: 10px;
+    background: #9b3cf0; /* Фиолетовый градиент заменить на просто фиолетовый */
     color: #fff;
   }
-  .brand{display:flex; gap:12px; align-items:center;}
-  .logo{width:110px; height:auto;}
-  .company{font-size:18px; font-weight:700;}
-  .company-sub{font-size:10px; opacity:0.9;}
-  .meta{font-size:9.5pt; opacity:0.95; text-align:right;}
-  .card{background:#fff; border-radius:12px; padding:18px; margin-top:16px; border:1px solid #eef1fb; box-shadow:0 10px 30px rgba(20,30,60,0.06);}
-  .row{display:flex; gap:20px;}
-  .col-left{flex:1;}
-  .col-right{width:220px;}
-  .service{font-size:18pt; color:var(--accent-dark); font-weight:800; margin-bottom:6px;}
-  .meta-info{font-size:11pt; color:#333; margin-bottom:8px;}
-  .price{font-size:34pt; color:var(--accent-end); font-weight:800; margin-top:6px;}
-  .small{font-size:9.5pt; color:var(--muted);}
-  .qr{width:200px; height:200px; border-radius:8px; border:1px solid #f1f3f8; display:block; background:#fff; padding:6px;}
-  .contact{font-size:10pt; color:#333; margin-bottom:6px;}
-  .voucher-link{word-break:break-all; font-size:9.5pt; color:var(--accent-start);}
-  .footer{margin-top:18px; font-size:9pt; color:var(--muted); border-top:1px dashed #e6eaf6; padding-top:12px;}
-  .cta {
-    display:inline-block;
-    margin-top:10px;
-    padding:10px 18px;
-    border-radius:24px;
-    color:#fff;
-    background: linear-gradient(90deg, var(--accent-start), var(--accent-end));
-    font-weight:700;
-    text-decoration:none;
-    font-size:11pt;
+  .brand {
+    display: inline-block;
+    vertical-align: top;
+    margin-right: 20px;
   }
-
-  /* Подгонка для печати */
+  .logo {
+    width: 110px;
+    height: auto;
+  }
+  .company {
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .company-sub {
+    font-size: 10px;
+    opacity: 0.9;
+  }
+  .meta {
+    display: inline-block;
+    font-size: 9.5pt;
+    opacity: 0.95;
+    text-align: right;
+    float: right;
+    margin-top: 8px;
+  }
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 18px;
+    margin-top: 16px;
+    border: 1px solid #eef1fb;
+    /* box-shadow не поддерживается в mPDF */
+  }
+  .row {
+    width: 100%;
+    /* mPDF не поддерживает flex/gap, используем inline-block */
+    margin-bottom: 0;
+    white-space: nowrap;
+  }
+  .col-left {
+    width: 60%;
+    display: inline-block;
+    vertical-align: top;
+    white-space: normal;
+  }
+  .col-right {
+    width: 37%;
+    display: inline-block;
+    vertical-align: top;
+    text-align: center;
+    white-space: normal;
+  }
+  .service {
+    font-size: 18pt;
+    color: #6a2bb0;
+    font-weight: 800;
+    margin-bottom: 6px;
+  }
+  .meta-info {
+    font-size: 11pt;
+    color: #333;
+    margin-bottom: 8px;
+  }
+  .price {
+    font-size: 34pt;
+    color: #e13db7;
+    font-weight: 800;
+    margin-top: 6px;
+  }
+  .small {
+    font-size: 9.5pt;
+    color: #6b7280;
+  }
+  .qr {
+    width: 200px;
+    height: 200px;
+    border-radius: 8px;
+    border: 1px solid #f1f3f8;
+    background: #fff;
+    padding: 6px;
+    margin: 0 auto;
+    display: block;
+  }
+  .contact {
+    font-size: 10pt;
+    color: #333;
+    margin-bottom: 6px;
+  }
+  .voucher-link {
+    word-break: break-all;
+    font-size: 9.5pt;
+    color: #9b3cf0;
+  }
+  .footer {
+    margin-top: 18px;
+    font-size: 9pt;
+    color: #6b7280;
+    border-top: 1px dashed #e6eaf6;
+    padding-top: 12px;
+  }
+  .cta {
+    display: inline-block;
+    margin-top: 10px;
+    padding: 10px 18px;
+    border-radius: 24px;
+    color: #fff;
+    background: #e13db7;
+    font-weight: 700;
+    text-decoration: none;
+    font-size: 11pt;
+  }
   @media print {
-    body{background:#fff}
-    .page{padding:8px}
+    body { background: #fff; }
+    .page { padding: 8px; }
   }
 </style>
 </head>
@@ -72,6 +154,7 @@
         <div>Документ: <strong>{{docId}}</strong></div>
         <div>Дата: {{date}}</div>
       </div>
+      <div style="clear: both;"></div>
     </div>
 
     <div class="card">

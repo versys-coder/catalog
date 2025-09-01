@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import "./services.css";
 
-// Универсальный тип сервиса (можно доработать под ваш backend)
 type Service = {
   id: string;
   title: string;
@@ -15,10 +14,13 @@ type Service = {
 };
 
 type BuyStatus = "idle" | "loading" | "success" | "error";
-type PurchaseResponse = {
+
+type AlfaRegisterResponse = {
   ok: boolean;
   message?: string;
-  voucher_url?: string;
+  formUrl?: string;
+  orderId?: string;
+  orderNumber?: string;
 };
 
 export default function App() {
@@ -32,7 +34,7 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [buyStatus, setBuyStatus] = useState<BuyStatus>("idle");
   const [buyMessage, setBuyMessage] = useState("");
-  const [voucherUrl, setVoucherUrl] = useState<string | null>(null);
+  const [payFormUrl, setPayFormUrl] = useState<string | null>(null);
 
   // Загрузка каталога из API
   useEffect(() => {
@@ -50,7 +52,6 @@ export default function App() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
-        // Универсальный разбор структуры ответа
         let items: any[] = [];
         if (Array.isArray(data)) items = data;
         else if (Array.isArray(data.goods)) items = data.goods;
@@ -58,7 +59,6 @@ export default function App() {
         else if (Array.isArray(data.data)) items = data.data;
         else if (typeof data === "object" && data !== null) items = [data];
 
-        // Маппинг API -> Service[]
         const mapped: Service[] = items.map((it: any) => ({
           id: String(it.id ?? it.ID ?? it.code ?? it.name ?? Math.random()),
           title: it.title ?? it.name ?? it.service_name ?? it.caption ?? "",
@@ -100,14 +100,14 @@ export default function App() {
     setEmail("");
     setBuyStatus("idle");
     setBuyMessage("");
-    setVoucherUrl(null);
+    setPayFormUrl(null);
     setIsPopupOpen(true);
   }
 
   function closePopup() {
     setIsPopupOpen(false);
     setSelected(null);
-    setVoucherUrl(null);
+    setPayFormUrl(null);
     setBuyStatus("idle");
     setBuyMessage("");
   }
@@ -123,6 +123,7 @@ export default function App() {
 
     setBuyStatus("loading");
     setBuyMessage("");
+    setPayFormUrl(null);
 
     try {
       const priceValue = selected.price?.value ?? 0;
@@ -139,7 +140,8 @@ export default function App() {
         email: email.trim()
       };
 
-      const res = await fetch("/catalog/api-backend/api/purchase.php", {
+      // Регистрация заказа в Альфе
+      const res = await fetch("/catalog/api-backend/api/alfa_register.php", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
@@ -150,14 +152,24 @@ export default function App() {
         throw new Error(`HTTP ${res.status}: ${txt}`);
       }
 
-      const json: PurchaseResponse = await res.json();
-      if (!json.ok) {
-        throw new Error(json.message || "Ошибка покупки");
+      const json: AlfaRegisterResponse = await res.json();
+      if (!json.ok || !json.formUrl) {
+        throw new Error(json.message || "Ошибка регистрации оплаты");
       }
 
       setBuyStatus("success");
-      setBuyMessage(json.message || "Покупка успешно оформлена. Письмо отправлено на почту.");
-      if (json.voucher_url) setVoucherUrl(json.voucher_url);
+      setBuyMessage("Открылось окно оплаты Альфа‑Банка. После успешной оплаты вас вернёт на сайт, и ваучер придёт на почту.");
+      setPayFormUrl(json.formUrl);
+
+      // Попробуем открыть окно оплаты
+      const w = 520, h = 760;
+      const y = window.top.outerHeight/2 + window.top.screenY - ( h/2);
+      const x = window.top.outerWidth/2 + window.top.screenX - ( w/2);
+      const win = window.open(json.formUrl, "alfaPay", `popup=yes,width=${w},height=${h},left=${x},top=${y}`);
+      if (!win) {
+        // Если браузер заблокировал попап — показываем ссылку
+        setBuyMessage("Ваш браузер заблокировал всплывающее окно. Нажмите «Открыть оплату» ниже.");
+      }
     } catch (err: any) {
       setBuyStatus("error");
       setBuyMessage(err.message || "Ошибка");
@@ -214,12 +226,16 @@ export default function App() {
         <div className="popup-overlay" role="dialog" aria-modal="true">
           <div className="popup">
             <button className="popup-close" onClick={closePopup} aria-label="Закрыть">×</button>
-            <h3 className="popup-title">ПОКУПКА</h3>
+            <h3 className="popup-title">ОПЛАТА</h3>
             <div className="popup-subtitle" style={{ marginBottom: 8 }}>
               <div style={{ fontWeight: 700 }}>{selected.title}</div>
               <div style={{ fontWeight: 700 }}>{selected.price?.currency}{selected.price?.value}</div>
             </div>
             <form onSubmit={submitBuy} className="popup-form">
+              <div style={{ marginBottom: 8, fontSize: 14, color: "#374151" }}>
+                Оплата будет выполнена на защищённой странице Альфа‑Банка.
+                После успешной оплаты вас вернёт на сайт и автоматически сформируется ваучер.
+              </div>
               <label>
                 Телефон
                 <input
@@ -241,19 +257,22 @@ export default function App() {
                 />
               </label>
               <button type="submit" className="popup-pay" disabled={buyStatus === "loading"}>
-                {buyStatus === "loading" ? "ОПЛАТА..." : "ОПЛАТИТЬ"}
+                {buyStatus === "loading" ? "ОТКРЫВАЕМ ОПЛАТУ…" : "ОПЛАТИТЬ КАРТОЙ"}
               </button>
-              {buyStatus === "error" && <div className="popup-error">{buyMessage}</div>}
-              {buyStatus === "success" && <div className="popup-success">{buyMessage}</div>}
-              {voucherUrl && (
-                <div style={{ textAlign: "center", marginTop: 12 }}>
-                  <a className="voucher-link" href={voucherUrl} target="_blank" rel="noreferrer">
-                    Скачать абонемент
+
+              {payFormUrl && (
+                <div style={{ textAlign: "center", marginTop: 10 }}>
+                  <a className="voucher-link" href={payFormUrl} target="_blank" rel="noreferrer">
+                    Открыть оплату
                   </a>
                 </div>
               )}
+
+              {buyStatus === "error" && <div className="popup-error">{buyMessage}</div>}
+              {buyStatus === "success" && <div className="popup-success">{buyMessage}</div>}
+
               <div className="popup-agreement">
-                Нажимая кнопку «Оплатить», вы даёте согласие на обработку своих персональных данных и соглашаетесь с «Публичной офертой»
+                Нажимая кнопку «Оплатить», вы соглашаетесь с условиями оферты и обработкой персональных данных.
               </div>
             </form>
           </div>

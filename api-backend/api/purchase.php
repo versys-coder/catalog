@@ -1,7 +1,6 @@
 <?php
 declare(strict_types=1);
 
-// purchase.php — версия с гарантированной отправкой писем в UTF-8 без кракозябр
 require __DIR__ . '/../../vendor/autoload.php';
 
 use Dotenv\Dotenv;
@@ -53,6 +52,17 @@ function load_env(): void {
 }
 load_env();
 
+/**
+ * Приводит значение цены к целым рублям (int).
+ */
+function normalize_rub($v): int {
+    $s = (string)$v;
+    $s = str_replace(["\xC2\xA0", "\xA0", ' '], '', $s);
+    $s = str_replace(',', '.', $s);
+    if ($s === '' || !preg_match('/^-?\d+(\.\d+)?$/', $s)) return 0;
+    return (int)round((float)$s, 0);
+}
+
 // ---- read request ----
 $raw = file_get_contents('php://input') ?: '';
 $data = json_decode($raw, true);
@@ -60,39 +70,39 @@ if (json_last_error() !== JSON_ERROR_NONE) {
     respond(false, 'Invalid JSON body');
 }
 
-$serviceId = (string)($data['service_id'] ?? $data['serviceId'] ?? $data['id'] ?? '');
+$serviceId   = (string)($data['service_id'] ?? $data['serviceId'] ?? $data['id'] ?? '');
 $serviceName = (string)($data['service_name'] ?? $data['serviceName'] ?? '');
-$phone = (string)($data['phone'] ?? '');
-$email = (string)($data['email'] ?? '');
-$price = $data['price'] ?? null;
-$visits = $data['visits'] ?? null;
-$freezing = $data['freezing'] ?? null;
+$phone       = (string)($data['phone'] ?? '');
+$email       = (string)($data['email'] ?? '');
+$priceInput  = $data['price'] ?? null;
+$visits      = $data['visits'] ?? null;
+$freezing    = $data['freezing'] ?? null;
 
 if ($serviceId === '' || $phone === '' || $email === '') {
     respond(false, 'Missing required fields (service_id, phone, email)');
 }
 
 // ---- load configuration from env (safe) ----
-$FASTSALE_ENDPOINT = safe_getenv('FASTSALE_ENDPOINT', safe_getenv('FASTSALES_ENDPOINT', ''));
-$CLUB_ID = safe_getenv('CLUB_ID', '');
-$PUBLIC_BASE = rtrim(safe_getenv('PUBLIC_BASE', ''), '/');
-$VOUCHERS_DIR = safe_getenv('VOUCHERS_DIR', __DIR__ . '/../../vouchers');
-$VOUCHER_SECRET = safe_getenv('VOUCHER_SECRET', safe_getenv('SECRET', 'please-change-me'));
-$API_USER_TOKEN = safe_getenv('API_USER_TOKEN', '');
-$API_KEY = safe_getenv('API_KEY', '');
-$BASIC_USER = safe_getenv('BASIC_USER', '');
-$BASIC_PASS = safe_getenv('BASIC_PASS', '');
+$FASTSALE_ENDPOINT     = safe_getenv('FASTSALE_ENDPOINT', safe_getenv('FASTSALES_ENDPOINT', ''));
+$CLUB_ID               = safe_getenv('CLUB_ID', '');
+$PUBLIC_BASE           = rtrim(safe_getenv('PUBLIC_BASE', ''), '/');
+$VOUCHERS_DIR          = safe_getenv('VOUCHERS_DIR', __DIR__ . '/../../vouchers');
+$VOUCHER_SECRET        = safe_getenv('VOUCHER_SECRET', safe_getenv('SECRET', 'please-change-me'));
+$API_USER_TOKEN        = safe_getenv('API_USER_TOKEN', '');
+$API_KEY               = safe_getenv('API_KEY', '');
+$BASIC_USER            = safe_getenv('BASIC_USER', '');
+$BASIC_PASS            = safe_getenv('BASIC_PASS', '');
 
 // SMTP
-$SMTP_HOST = safe_getenv('SMTP_HOST', '');
-$SMTP_PORT = intval(safe_getenv('SMTP_PORT', '0'));
-$SMTP_USER = safe_getenv('SMTP_USER', '');
-$SMTP_PASS = safe_getenv('SMTP_PASS', '');
-$SMTP_FROM = safe_getenv('SMTP_FROM', 'noreply@' . ($_SERVER['HTTP_HOST'] ?? 'localhost'));
-$SMTP_FROM_NAME = safe_getenv('SMTP_FROM_NAME', 'DVVS');
+$SMTP_HOST       = safe_getenv('SMTP_HOST', '');
+$SMTP_PORT       = intval(safe_getenv('SMTP_PORT', '0'));
+$SMTP_USER       = safe_getenv('SMTP_USER', '');
+$SMTP_PASS       = safe_getenv('SMTP_PASS', '');
+$SMTP_FROM       = safe_getenv('SMTP_FROM', 'noreply@' . ($_SERVER['HTTP_HOST'] ?? 'localhost'));
+$SMTP_FROM_NAME  = safe_getenv('SMTP_FROM_NAME', 'DVVS');
 
 // External notify (optional)
-$EXTERNAL_NOTIFY_URL = safe_getenv('EXTERNAL_NOTIFY_URL', '');
+$EXTERNAL_NOTIFY_URL  = safe_getenv('EXTERNAL_NOTIFY_URL', '');
 $EXTERNAL_NOTIFY_AUTH = safe_getenv('EXTERNAL_NOTIFY_AUTH', '');
 
 if ($FASTSALE_ENDPOINT === '' || $CLUB_ID === '') {
@@ -101,32 +111,31 @@ if ($FASTSALE_ENDPOINT === '' || $CLUB_ID === '') {
 
 // ---- build docId and date ----
 $docId = uuid_v4();
-$date = (new DateTime('now', new DateTimeZone('Europe/Moscow')))->format('Y-m-d\TH:i:s');
+$date  = (new DateTime('now', new DateTimeZone('Europe/Moscow')))->format('Y-m-d\TH:i:s');
 
-// ---- prepare request body for FastSales ----
+// ---- prepare request body for FastSales (match Postman) ----
 $normalizedPhone = preg_replace('/\D+/', '', $phone);
+$priceRub = normalize_rub($priceInput);
+
 $requestBody = [
     'club_id' => $CLUB_ID,
-    'phone' => $normalizedPhone,
-    'email' => $email,
-    'sale' => [
-        'docId' => $docId,
-        'date' => $date,
-        'goods' => [
-            [
-                'code' => $serviceId,
-                'name' => $serviceName,
-                'price' => $price,
-                'qty' => 1,
-            ]
-        ]
+    'phone'   => $normalizedPhone,
+    'sale'    => [
+        'docId'    => $docId,
+        'date'     => $date,
+        'cashless' => 1,
+        'goods'    => [[
+            'id'   => $serviceId,
+            'qnt'  => 1,
+            'summ' => $priceRub
+        ]]
     ]
 ];
 
-// ---- build headers to match Postman (usertoken, apikey, Basic auth) ----
+// ---- build headers ----
 $headers = ['Content-Type: application/json'];
 if ($API_USER_TOKEN !== '') $headers[] = 'usertoken: ' . $API_USER_TOKEN;
-if ($API_KEY !== '') $headers[] = 'apikey: ' . $API_KEY;
+if ($API_KEY !== '')        $headers[] = 'apikey: ' . $API_KEY;
 if ($BASIC_USER !== '' || $BASIC_PASS !== '') {
     $headers[] = 'Authorization: Basic ' . base64_encode($BASIC_USER . ':' . $BASIC_PASS);
 }
@@ -137,7 +146,7 @@ curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 curl_setopt($ch, CURLOPT_POST, true);
 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($requestBody, JSON_UNESCAPED_UNICODE));
 curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+curl_setopt($ch, CURLOPT_TIMEOUT, 20);
 curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
 $disableSslVerify = (bool)filter_var(safe_getenv('DISABLE_SSL_VERIFY', '0'), FILTER_VALIDATE_BOOLEAN);
 if ($disableSslVerify) {
@@ -146,12 +155,12 @@ if ($disableSslVerify) {
 }
 $response = curl_exec($ch);
 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE) ?: 0;
-$curlErr = curl_error($ch) ?: '';
+$curlErr  = curl_error($ch) ?: '';
 curl_close($ch);
 
-// log request/response for debugging (do not keep secrets in logs long-term)
-log_debug('FastSales request to ' . $FASTSALE_ENDPOINT . ' headers=' . json_encode($headers));
-log_debug('FastSales request body=' . substr(json_encode($requestBody, JSON_UNESCAPED_UNICODE), 0, 2000));
+// ---- log request/response ----
+log_debug('FastSales request to ' . $FASTSALE_ENDPOINT . ' headers=' . json_encode($headers, JSON_UNESCAPED_UNICODE));
+log_debug('FastSales request body=' . substr(json_encode($requestBody, JSON_UNESCAPED_UNICODE), 0, 4000));
 log_debug("FastSales response HTTP={$httpCode} curlErr={$curlErr} resp=" . substr((string)$response, 0, 4000));
 
 if ($response === false || $httpCode >= 400) {
@@ -193,7 +202,7 @@ if (is_readable($templatePath)) {
 // ---- generate QR ONLY by phone ----
 $qrDataUri = '';
 try {
-    $qrPayload = $normalizedPhone; // Только номер телефона!
+    $qrPayload = $normalizedPhone;
     $options = new QROptions([
         'version'=>5,
         'outputType'=>QRCode::OUTPUT_IMAGE_PNG,
@@ -218,16 +227,16 @@ if ($logoPathEnv && is_readable($logoPathEnv)) {
 
 // ---- replace placeholders in template ----
 $replacements = [
-    '{{logo_src}}' => $logoDataUri,
-    '{{docId}}' => htmlspecialchars($docId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
-    '{{date}}' => htmlspecialchars($date, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
-    '{{service_name}}' => $serviceEsc,
-    '{{price}}' => htmlspecialchars((string)$price, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
-    '{{visits}}' => htmlspecialchars((string)$visits, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
-    '{{freezing}}' => htmlspecialchars((string)$freezing, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
-    '{{phone}}' => htmlspecialchars($phone, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
-    '{{email}}' => htmlspecialchars($email, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
-    '{{qr_code_data}}' => $qrDataUri,
+    '{{logo_src}}'    => $logoDataUri,
+    '{{docId}}'       => htmlspecialchars($docId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+    '{{date}}'        => htmlspecialchars($date, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+    '{{service_name}}'=> $serviceEsc,
+    '{{price}}'       => htmlspecialchars((string)$priceRub, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+    '{{visits}}'      => htmlspecialchars((string)$visits, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+    '{{freezing}}'    => htmlspecialchars((string)$freezing, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+    '{{phone}}'       => htmlspecialchars($phone, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+    '{{email}}'       => htmlspecialchars($email, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+    '{{qr_code_data}}'=> $qrDataUri,
     '{{voucher_url}}' => htmlspecialchars($publicVoucherUrlBase, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
 ];
 
@@ -256,7 +265,7 @@ $metaContent = json_encode([
     'email' => $email,
     'phone' => $normalizedPhone,
     'service' => $serviceId,
-    'price' => $price,
+    'price' => $priceRub,
     'created' => date('c')
 ], JSON_UNESCAPED_UNICODE);
 @file_put_contents($metaPath, $metaContent, LOCK_EX);
@@ -281,35 +290,21 @@ try {
             $mail->Password = $SMTP_PASS;
         }
         $enc = strtolower(safe_getenv('SMTP_ENC', safe_getenv('MAIL_ENC', '')));
-        if (in_array($enc, ['ssl','smtps'], true)) {
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
-        } elseif (in_array($enc, ['tls','starttls'], true)) {
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-        }
-        if ((bool)filter_var(safe_getenv('SMTP_ALLOW_SELF_SIGNED', '0'), FILTER_VALIDATE_BOOLEAN)) {
-            $mail->SMTPOptions = [
-                'ssl' => [
-                    'verify_peer' => false,
-                    'verify_peer_name' => false,
-                    'allow_self_signed' => true,
-                ]
-            ];
-        }
-    } else {
-        $mail->isMail();
+        if ($enc === 'tls') $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+        if ($enc === 'ssl') $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
     }
 
-    // ОБЯЗАТЕЛЬНО: чтобы не было кракозябр
     $mail->CharSet = 'UTF-8';
-    $mail->Encoding = PHPMailer::ENCODING_BASE64;
+    $mail->Encoding = 'base64';
+
     $mail->setFrom($SMTP_FROM, $SMTP_FROM_NAME);
     $mail->addAddress($email);
-    $mail->Subject = 'Ваш абонемент — ' . htmlspecialchars($serviceName);
+    $mail->Subject = 'Ваш абонемент — ' . $serviceName;
     $mail->isHTML(true);
     $mailBody = '<p>Здравствуйте!</p>';
-    $mailBody .= '<p>Спасибо за покупку: <strong>' . htmlspecialchars($serviceName) . '</strong></p>';
-    $mailBody .= '<p>Документ: <strong>' . htmlspecialchars($docId) . '</strong></p>';
-    $mailBody .= '<p>Ссылка для скачивания ваучера: <a href="' . htmlspecialchars($voucherPublicWithToken) . '">скачать ваучер</a></p>';
+    $mailBody .= '<p>Спасибо за покупку: <strong>' . htmlspecialchars($serviceName, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</strong></p>';
+    $mailBody .= '<p>Документ: <strong>' . htmlspecialchars($docId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</strong></p>';
+    $mailBody .= '<p>Ссылка для скачивания ваучера: <a href="' . htmlspecialchars($voucherPublicWithToken, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '">скачать ваучер</a></p>';
     $mailBody .= '<p>Если у вас возникают проблемы, свяжитесь с поддержкой.</p>';
     $mail->Body = $mailBody;
     $mail->AltBody = 'Спасибо за покупку. Ссылка на ваучер: ' . $voucherPublicWithToken;
@@ -332,15 +327,17 @@ $logLine = sprintf("[%s] doc=%s service=%s phone=%s email=%s fastsales_http=%d m
 @file_put_contents(safe_getenv('LOG_PATH', __DIR__ . '/../../purchase.log'), $logLine, FILE_APPEND | LOCK_EX);
 
 // ---- optional: notify external system of purchase ----
+$EXTERNAL_NOTIFY_URL = safe_getenv('EXTERNAL_NOTIFY_URL', '');
+$EXTERNAL_NOTIFY_AUTH = safe_getenv('EXTERNAL_NOTIFY_AUTH', '');
 if ($EXTERNAL_NOTIFY_URL !== '') {
     $notifyPayload = [
-        'doc' => $docId,
-        'service_id' => $serviceId,
+        'doc'          => $docId,
+        'service_id'   => $serviceId,
         'service_name' => $serviceName,
-        'phone' => $normalizedPhone,
-        'email' => $email,
-        'price' => $price,
-        'voucher_url' => $voucherPublicWithToken,
+        'phone'        => $normalizedPhone,
+        'email'        => $email,
+        'price'        => $priceRub,
+        'voucher_url'  => $voucherPublicWithToken,
         'fastsales_http' => $httpCode,
     ];
     $nc = curl_init($EXTERNAL_NOTIFY_URL);
@@ -359,4 +356,7 @@ if ($EXTERNAL_NOTIFY_URL !== '') {
 }
 
 // ---- final response ----
-respond(true, 'Покупка зарегистрирована', ['voucher_url' => $voucherPublicWithToken, 'doc' => $docId]);
+respond(true, 'Покупка зарегистрирована', [
+    'voucher_url' => $voucherPublicWithToken,
+    'doc' => $docId
+]);
