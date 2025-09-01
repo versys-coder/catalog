@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 /**
  * Возврат с Альфа-Банка.
- * Подтверждаем статус оплаты и, если успех — вызываем purchase.php
- * для генерации PDF и отправки письма.
+ * Проверяем статус оплаты, при успехе вызываем purchase.php.
+ * Затем сохраняем результат в localStorage и возвращаем пользователя на back URL.
  */
 
 require __DIR__ . '/../api-backend/vendor/autoload.php';
@@ -35,6 +35,15 @@ load_alfa_env();
 
 $orderId     = (string)($_GET['orderId'] ?? $_POST['orderId'] ?? '');
 $orderNumber = (string)($_GET['orderNumber'] ?? $_POST['orderNumber'] ?? '');
+$backUrl     = (string)($_GET['back'] ?? '');
+if ($backUrl !== '') $backUrl = urldecode($backUrl);
+
+// Если back не передали — по умолчанию вернём в каталог
+if ($backUrl === '') {
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host   = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $backUrl = $scheme . '://' . $host . '/catalog/dist/';
+}
 
 $ALFA_BASE_URL        = rtrim(getenv('ALFA_BASE_URL') ?: 'https://alfa.rbsuat.com/payment', '/');
 $ALFA_USER            = getenv('ALFA_USER') ?: '';
@@ -47,22 +56,14 @@ $statusUrl = $ALFA_BASE_URL . '/rest/getOrderStatusExtended.do';
 $fields = ['language' => 'ru'];
 if ($orderId !== '') $fields['orderId'] = $orderId;
 if ($orderNumber !== '') $fields['orderNumber'] = $orderNumber;
-if ($ALFA_TOKEN !== '') {
-    $fields['token'] = $ALFA_TOKEN;
-} else {
-    $fields['userName'] = $ALFA_USER;
-    $fields['password'] = $ALFA_PASS;
-}
+if ($ALFA_TOKEN !== '') { $fields['token'] = $ALFA_TOKEN; } else { $fields['userName'] = $ALFA_USER; $fields['password'] = $ALFA_PASS; }
 
 $ch = curl_init($statusUrl);
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 curl_setopt($ch, CURLOPT_POST, true);
 curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($fields));
 curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/x-www-form-urlencoded']);
-if ($ALFA_SKIP_SSL_VERIFY) {
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
-}
+if ($ALFA_SKIP_SSL_VERIFY) { curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0); }
 curl_setopt($ch, CURLOPT_TIMEOUT, 20);
 $resp = curl_exec($ch);
 $http = curl_getinfo($ch, CURLINFO_HTTP_CODE) ?: 0;
@@ -108,10 +109,7 @@ if ($success && is_array($meta)) {
     curl_setopt($pch, CURLOPT_POSTFIELDS, json_encode($body, JSON_UNESCAPED_UNICODE));
     curl_setopt($pch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
     $skip = getenv('ALFA_SKIP_SSL_VERIFY');
-    if ($skip === '1' || strtolower((string)$skip) === 'true') {
-        curl_setopt($pch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($pch, CURLOPT_SSL_VERIFYHOST, 0);
-    }
+    if ($skip === '1' || strtolower((string)$skip) === 'true') { curl_setopt($pch, CURLOPT_SSL_VERIFYPEER, false); curl_setopt($pch, CURLOPT_SSL_VERIFYHOST, 0); }
     curl_setopt($pch, CURLOPT_TIMEOUT, 30);
     $presp = curl_exec($pch);
     $phttp = curl_getinfo($pch, CURLINFO_HTTP_CODE) ?: 0;
@@ -121,46 +119,55 @@ if ($success && is_array($meta)) {
     log_debug("CALL purchase.php HTTP={$phttp} err={$perr} resp=" . substr((string)$presp, 0, 2000));
     $purchaseResult = json_decode((string)$presp, true);
 }
+
+$voucherUrl = is_array($purchaseResult) ? ($purchaseResult['voucher_url'] ?? '') : '';
+$msg = is_array($purchaseResult) ? ($purchaseResult['message'] ?? ($success ? 'Оплата подтверждена' : 'Оплата не подтверждена')) : ($success ? 'Оплата подтверждена' : 'Оплата не подтверждена');
+$okPayload = (bool)$success && (bool)($purchaseResult['ok'] ?? true);
+
+// Страница ставит localStorage и уводит обратно на backUrl
+$payload = [
+    'ok'          => $okPayload,
+    'voucher_url' => $voucherUrl,
+    'message'     => $msg,
+    'orderId'     => $orderId ?: $orderNumber,
+];
+
 ?>
 <!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Оплата — Дворец водных видов спорта</title>
+  <title>Возврат после оплаты</title>
   <style>
-    body{font-family: -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; margin:24px; color:#111;}
-    .card{max-width:860px; padding:20px; border:1px solid #e5e7eb; border-radius:12px; background:#fff;}
-    .ok{color:#16a34a; font-weight:700;}
-    .err{color:#b91c1c; font-weight:700;}
-    a.btn{display:inline-block; margin-top:12px; padding:10px 16px; border-radius:8px; background:#7c3aed; color:#fff; text-decoration:none; font-weight:700;}
-    .muted{color:#6b7280; font-size:13px;}
-    pre{white-space:pre-wrap; background:#f9fafb; padding:12px; border-radius:8px; border:1px solid #e5e7eb; font-size:12px;}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px;color:#111}
+    .muted{color:#6b7280}
+    .ok{color:#16a34a;font-weight:700}
+    .err{color:#b91c1c;font-weight:700}
+    a.btn{display:inline-block;margin-top:12px;padding:10px 16px;border-radius:8px;background:#7c3aed;color:#fff;text-decoration:none}
   </style>
 </head>
 <body>
-  <div class="card">
-    <h2>Результат оплаты</h2>
-    <?php if (!$ok): ?>
-      <p class="err">Ошибка при запросе статуса оплаты.</p>
-      <pre><?php echo h((string)$resp) ?></pre>
-    <?php elseif (!$success): ?>
-      <p class="err">Оплата не подтверждена (orderStatus=<?php echo h((string)$orderStatus) ?>).</p>
-      <div class="muted">Если сумма списалась, обратитесь в поддержку, указав номер заказа: <?php echo h($orderId ?: $orderNumber) ?>.</div>
-    <?php else: ?>
-      <p class="ok">Оплата успешно подтверждена.</p>
-      <?php if (is_array($purchaseResult) && ($purchaseResult['ok'] ?? false) && ($purchaseResult['voucher_url'] ?? '')): ?>
-        <p>Ваш ваучер готов:</p>
-        <p><a class="btn" href="<?php echo h($purchaseResult['voucher_url']) ?>" target="_blank" rel="noopener">Скачать ваучер</a></p>
-        <p class="muted">Ссылка также отправлена вам на e‑mail.</p>
-      <?php else: ?>
-        <p class="err">Ваучер пока не сформирован.</p>
-        <div class="muted">Подробности ниже (для службы поддержки):</div>
-        <pre><?php echo h(json_encode($purchaseResult, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT)) ?></pre>
-      <?php endif; ?>
+  <div>
+    <div class="<?php echo $okPayload ? 'ok':'err'; ?>">
+      <?php echo $okPayload ? 'Оплата подтверждена' : 'Оплата не подтверждена'; ?>
+    </div>
+    <?php if ($voucherUrl): ?>
+      <div><a class="btn" href="<?php echo h($voucherUrl) ?>" target="_blank" rel="noopener">Скачать ваучер</a></div>
     <?php endif; ?>
-    <hr/>
-    <div class="muted">Заказ: <?php echo h($orderId ?: $orderNumber) ?></div>
+    <p class="muted">Сейчас вы будете автоматически возвращены на сайт.</p>
+    <p><a class="btn" href="<?php echo h($backUrl) ?>">Вернуться</a></p>
   </div>
+  <script>
+    (function(){
+      try{
+        localStorage.setItem('alfaPaymentResult', JSON.stringify(<?php echo json_encode($payload, JSON_UNESCAPED_UNICODE); ?>));
+        // Удалим "ожидаемую оплату", если сохраняли
+        localStorage.removeItem('alfaPending');
+      }catch(e){}
+      // Возвращаемся на исходную страницу
+      try{ window.location.replace(<?php echo json_encode($backUrl); ?>); }catch(e){ window.location.href = <?php echo json_encode($backUrl); ?>; }
+    })();
+  </script>
 </body>
 </html>

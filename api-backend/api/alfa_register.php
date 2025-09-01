@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 // Регистрация заказа в Альфа-Банке и выдача formUrl
-// POST JSON: { service_id, service_name, price, phone, email, visits?, freezing? }
+// POST JSON: { service_id, service_name, price, phone, email, visits?, freezing?, back_url? }
 // Ответ: { ok, message, formUrl, orderId, orderNumber }
 
 require __DIR__ . '/../../vendor/autoload.php';
@@ -22,32 +22,17 @@ function log_debug(string $msg): void {
     @file_put_contents($path, '[' . date('c') . '] ' . $msg . PHP_EOL, FILE_APPEND | LOCK_EX);
 }
 
-/**
- * Грузим /opt/catalog/alfa.env. Если файл не читается пользователем PHP (www-data),
- * явно пишем об этом в логи и возвращаем флаг readable=false.
- */
-function load_alfa_env(): array {
+function load_alfa_env(): void {
     $envPath = '/opt/catalog';
-    $file = $envPath . '/alfa.env';
-    $loaded = false;
-    $readable = is_readable($file);
-
-    if ($readable) {
+    if (is_dir($envPath) && is_readable($envPath . '/alfa.env')) {
         try {
             $dotenv = Dotenv::createImmutable($envPath, 'alfa.env');
             $dotenv->safeLoad();
-            foreach ($_ENV as $k => $v) {
-                if ($v !== null && $v !== '') putenv("$k=$v");
-            }
-            $loaded = true;
-        } catch (Throwable $e) {
-            log_debug('ALFA ENV load error: ' . $e->getMessage());
+        } catch (Throwable $e) {}
+        foreach ($_ENV as $k => $v) {
+            if ($v !== null && $v !== '') putenv("$k=$v");
         }
-    } else {
-        log_debug('ALFA ENV is not readable by PHP: ' . $file . ' (fix permissions: chgrp www-data /opt/catalog/alfa.env && chmod 640 /opt/catalog/alfa.env)');
     }
-
-    return ['file' => $file, 'loaded' => $loaded, 'readable' => $readable];
 }
 
 /** Приводит рубли к целому int (6480, "6 480", "6480,00" -> 6480). */
@@ -63,7 +48,7 @@ function ensure_dir(string $dir): void {
     if (!is_dir($dir)) @mkdir($dir, 0755, true);
 }
 
-$envInfo = load_alfa_env();
+load_alfa_env();
 
 $raw = file_get_contents('php://input') ?: '';
 $data = json_decode($raw, true);
@@ -78,12 +63,13 @@ $phone       = (string)($data['phone'] ?? '');
 $email       = (string)($data['email'] ?? '');
 $visits      = $data['visits'] ?? null;
 $freezing    = $data['freezing'] ?? null;
+$backUrlIn   = (string)($data['back_url'] ?? '');
 
 if ($serviceId === '' || $serviceName === '' || $priceInput === null || $phone === '' || $email === '') {
     json_response(false, 'Missing required fields (service_id, service_name, price, phone, email)');
 }
 
-// Конфиг Альфы из окружения
+// Конфиг Альфы
 $ALFA_BASE_URL        = rtrim(getenv('ALFA_BASE_URL') ?: 'https://alfa.rbsuat.com/payment', '/');
 $ALFA_USER            = getenv('ALFA_USER') ?: '';
 $ALFA_PASS            = getenv('ALFA_PASS') ?: '';
@@ -91,23 +77,37 @@ $ALFA_TOKEN           = getenv('ALFA_TOKEN') ?: '';
 $ALFA_CLIENT_ID       = getenv('ALFA_CLIENT_ID') ?: '';
 $ALFA_SKIP_SSL_VERIFY = (getenv('ALFA_SKIP_SSL_VERIFY') === '1' || strtolower((string)getenv('ALFA_SKIP_SSL_VERIFY')) === 'true');
 
+// Базовый returnUrl
 $DEFAULT_RETURN_URL  = getenv('DEFAULT_RETURN_URL') ?: '';
-if ($DEFAULT_RETURN_URL === '') {
+if ($DEFAULT_RETURN_URL === '' || stripos($DEFAULT_RETURN_URL, 'yourdomain') !== false) {
     $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
     $host   = $_SERVER['HTTP_HOST'] ?? 'localhost';
     $DEFAULT_RETURN_URL = $scheme . '://' . $host . '/catalog/public/return_alfa.php';
 }
 
+// Куда возвращаться в браузере после оплаты
+$backUrl = $backUrlIn;
+if ($backUrl === '') {
+    // Пробуем взять Referer
+    $ref = (string)($_SERVER['HTTP_REFERER'] ?? '');
+    if ($ref !== '') $backUrl = $ref;
+}
+// Если совсем пусто — вернёмся на каталог по умолчанию
+if ($backUrl === '') {
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host   = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $backUrl = $scheme . '://' . $host . '/catalog/dist/';
+}
+
+// Добавим back параметр в returnUrl
+$returnUrl = $DEFAULT_RETURN_URL . (strpos($DEFAULT_RETURN_URL, '?') === false ? '?' : '&') . 'back=' . rawurlencode($backUrl);
+
 // Проверка наличия кредов
 $hasToken = ($ALFA_TOKEN !== '');
 $hasUserPass = ($ALFA_USER !== '' && $ALFA_PASS !== '');
 if (!$hasToken && !$hasUserPass) {
-    $hint = 'Server misconfigured: ALFA_TOKEN or ALFA_USER/ALFA_PASS not set. ';
-    if (!$envInfo['readable']) {
-        $hint .= 'alfa.env not readable by PHP. Fix with: chgrp www-data /opt/catalog/alfa.env && chmod 640 /opt/catalog/alfa.env';
-    } else {
-        $hint .= 'Check /opt/catalog/alfa.env contents and variable names.';
-    }
+    $hint = 'Server misconfigured: ALFA_TOKEN or ALFA_USER/ALFA_PASS not set. '
+          . 'Check /opt/catalog/alfa.env. Also ensure readable by PHP: chgrp www-data /opt/catalog/alfa.env && chmod 640 /opt/catalog/alfa.env';
     log_debug($hint);
     json_response(false, $hint);
 }
@@ -128,7 +128,7 @@ $fields = [
     'currency'    => '810',
     'language'    => 'ru',
     'orderNumber' => $orderNumber,
-    'returnUrl'   => $DEFAULT_RETURN_URL,
+    'returnUrl'   => $returnUrl,
     // 'features' => 'AUTO_PAYMENT',
 ];
 if ($hasToken) {
@@ -195,6 +195,7 @@ $meta = [
     'visits'       => $visits,
     'freezing'     => $freezing,
     'created'      => date('c'),
+    'back_url'     => $backUrl,
 ];
 @file_put_contents($ordersDir . '/' . $orderId . '.json', json_encode($meta, JSON_UNESCAPED_UNICODE), LOCK_EX);
 @file_put_contents($ordersDir . '/' . $orderNumber . '.json', json_encode($meta, JSON_UNESCAPED_UNICODE), LOCK_EX);

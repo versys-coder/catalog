@@ -34,7 +34,32 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [buyStatus, setBuyStatus] = useState<BuyStatus>("idle");
   const [buyMessage, setBuyMessage] = useState("");
-  const [payFormUrl, setPayFormUrl] = useState<string | null>(null);
+  const [voucherUrl, setVoucherUrl] = useState<string | null>(null);
+
+  // При загрузке страницы — если вернулись из банка, читаем localStorage и открываем попап с результатом
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("alfaPaymentResult");
+      if (saved) {
+        const r = JSON.parse(saved);
+        setIsPopupOpen(true);
+        setBuyStatus(r.ok ? "success" : "error");
+        setBuyMessage(r.message || (r.ok ? "Оплата прошла" : "Оплата не подтверждена"));
+        if (r.voucher_url) setVoucherUrl(r.voucher_url);
+        // Пытаемся подтянуть сервис из "ожидаемой оплаты"
+        const pending = localStorage.getItem("alfaPending");
+        if (pending) {
+          const p = JSON.parse(pending);
+          if (p && p.service) setSelected(p.service);
+        }
+        // Очистим маркеры
+        localStorage.removeItem("alfaPaymentResult");
+        localStorage.removeItem("alfaPending");
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, []);
 
   // Загрузка каталога из API
   useEffect(() => {
@@ -103,14 +128,14 @@ export default function App() {
     setEmail("");
     setBuyStatus("idle");
     setBuyMessage("");
-    setPayFormUrl(null);
+    setVoucherUrl(null);
     setIsPopupOpen(true);
   }
 
   function closePopup() {
     setIsPopupOpen(false);
     setSelected(null);
-    setPayFormUrl(null);
+    setVoucherUrl(null);
     setBuyStatus("idle");
     setBuyMessage("");
   }
@@ -126,12 +151,12 @@ export default function App() {
 
     setBuyStatus("loading");
     setBuyMessage("");
-    setPayFormUrl(null);
 
     try {
       const priceValue = selected.price?.value ?? 0;
       const visits = (selected as any).visits ?? selected.duration ?? "";
       const freezing = (selected as any).freezing ?? "";
+      const backUrl = window.location.href;
 
       const body = {
         service_id: selected.id,
@@ -140,10 +165,10 @@ export default function App() {
         visits,
         freezing,
         phone: phone.trim(),
-        email: email.trim()
+        email: email.trim(),
+        back_url: backUrl
       };
 
-      // Регистрация заказа в Альфе
       const res = await fetch("/catalog/api-backend/api/alfa_register.php", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -160,21 +185,25 @@ export default function App() {
         throw new Error(json.message || "Ошибка регистрации оплаты");
       }
 
-      setBuyStatus("success");
-      setBuyMessage(
-        "Открылось окно оплаты Альфа‑Банка. После успешной оплаты вас вернёт на сайт, и ваучер придёт на почту."
-      );
-      setPayFormUrl(json.formUrl);
+      // Сохраним "ожидаемую оплату", чтобы после возврата восстановить попап
+      try {
+        localStorage.setItem(
+          "alfaPending",
+          JSON.stringify({
+            orderId: json.orderId,
+            orderNumber: json.orderNumber,
+            ts: Date.now(),
+            service: {
+              id: selected.id,
+              title: selected.title,
+              price: selected.price
+            }
+          })
+        );
+      } catch (e) {}
 
-      // Попробуем открыть окно оплаты
-      const w = 520;
-      const h = 760;
-      const y = window.outerHeight / 2 + window.screenY - h / 2;
-      const x = window.outerWidth / 2 + window.screenX - w / 2;
-      const win = window.open(json.formUrl, "alfaPay", `popup=yes,width=${w},height=${h},left=${x},top=${y}`);
-      if (!win) {
-        setBuyMessage("Ваш браузер заблокировал всплывающее окно. Нажмите «Открыть оплату» ниже.");
-      }
+      // Полная навигация на страницу оплаты Альфы
+      window.location.assign(json.formUrl);
     } catch (err: any) {
       setBuyStatus("error");
       setBuyMessage(err.message || "Ошибка");
@@ -226,64 +255,75 @@ export default function App() {
         )}
       </main>
 
-      {isPopupOpen && selected && (
+      {isPopupOpen && (
         <div className="popup-overlay" role="dialog" aria-modal="true">
           <div className="popup">
             <button className="popup-close" onClick={closePopup} aria-label="Закрыть">
               ×
             </button>
             <h3 className="popup-title">ОПЛАТА</h3>
-            <div className="popup-subtitle" style={{ marginBottom: 8 }}>
-              <div style={{ fontWeight: 700 }}>{selected.title}</div>
-              <div style={{ fontWeight: 700 }}>
-                {selected.price?.currency}
-                {selected.price?.value}
-              </div>
-            </div>
-            <form onSubmit={submitBuy} className="popup-form">
-              <div style={{ marginBottom: 8, fontSize: 14, color: "#374151" }}>
-                Оплата будет выполнена на защищённой странице Альфа‑Банка. После успешной оплаты вас вернёт на сайт и
-                автоматически сформируется ваучер.
-              </div>
-              <label>
-                Телефон
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  required
-                  placeholder="+7ХХХХХХХХХХ"
-                />
-              </label>
-              <label>
-                E-mail
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  placeholder="mail@example.com"
-                />
-              </label>
-              <button type="submit" className="popup-pay" disabled={buyStatus === "loading"}>
-                {buyStatus === "loading" ? "ОТКРЫВАЕМ ОПЛАТУ…" : "ОПЛАТИТЬ КАРТОЙ"}
-              </button>
 
-              {payFormUrl && (
-                <div style={{ textAlign: "center", marginTop: 10 }}>
-                  <a className="voucher-link" href={payFormUrl} target="_blank" rel="noreferrer">
-                    Открыть оплату
+            {selected && (
+              <div className="popup-subtitle" style={{ marginBottom: 8 }}>
+                <div style={{ fontWeight: 700 }}>{selected.title}</div>
+                <div style={{ fontWeight: 700 }}>
+                  {selected.price?.currency}
+                  {selected.price?.value}
+                </div>
+              </div>
+            )}
+
+            {/* Если ваучер уже готов (вернулись из банка) — показываем результат */}
+            {voucherUrl ? (
+              <div>
+                <div className="popup-success" style={{ marginBottom: 12 }}>
+                  {buyMessage || "Оплата прошла. Ваучер сформирован."}
+                </div>
+                <div style={{ textAlign: "center", marginTop: 12 }}>
+                  <a className="voucher-link" href={voucherUrl} target="_blank" rel="noreferrer">
+                    Скачать ваучер
                   </a>
                 </div>
-              )}
-
-              {buyStatus === "error" && <div className="popup-error">{buyMessage}</div>}
-              {buyStatus === "success" && <div className="popup-success">{buyMessage}</div>}
-
-              <div className="popup-agreement">
-                Нажимая кнопку «Оплатить», вы соглашаетесь с условиями оферты и обработкой персональных данных.
               </div>
-            </form>
+            ) : (
+              // Иначе — форма для отправки на оплату
+              <form onSubmit={submitBuy} className="popup-form">
+                <div style={{ marginBottom: 8, fontSize: 14, color: "#374151" }}>
+                  После нажатия кнопки вы перейдёте на защищённую страницу Альфа‑Банка. После оплаты мы вернём вас
+                  обратно и покажем ссылку на ваучер.
+                </div>
+                <label>
+                  Телефон
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    required
+                    placeholder="+7ХХХХХХХХХХ"
+                  />
+                </label>
+                <label>
+                  E-mail
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    placeholder="mail@example.com"
+                  />
+                </label>
+                <button type="submit" className="popup-pay" disabled={buyStatus === "loading"}>
+                  {buyStatus === "loading" ? "ПЕРЕХОД К ОПЛАТЕ…" : "ОПЛАТИТЬ КАРТОЙ"}
+                </button>
+
+                {buyStatus === "error" && <div className="popup-error">{buyMessage}</div>}
+                {buyStatus === "success" && !voucherUrl && <div className="popup-success">{buyMessage}</div>}
+
+                <div className="popup-agreement">
+                  Нажимая кнопку «Оплатить», вы соглашаетесь с условиями оферты и обработкой персональных данных.
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
