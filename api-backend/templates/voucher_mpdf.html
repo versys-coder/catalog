@@ -3,184 +3,70 @@
 <head>
 <meta charset="utf-8"/>
 <style>
-  /* Цвета и стиль, совместимые с mPDF (без CSS-переменных и сложных фич) */
-  body {
-    font-family: DejaVu Sans, Arial, sans-serif;
-    color: #222;
-    margin: 0;
-    background: #fbfbfe;
-  }
-  .page {
-    padding: 28px;
-    max-width: 900px;
-    margin: 0 auto;
-  }
-  .header {
-    /* mPDF не поддерживает flex, используем блочную верстку */
-    width: 100%;
-    padding: 12px 18px;
-    border-radius: 10px;
-    background: #9b3cf0; /* Фиолетовый градиент заменить на просто фиолетовый */
-    color: #fff;
-  }
-  .brand {
-    display: inline-block;
-    vertical-align: top;
-    margin-right: 20px;
-  }
-  .logo {
-    width: 110px;
-    height: auto;
-  }
-  .company {
-    font-size: 18px;
-    font-weight: 700;
-  }
-  .company-sub {
-    font-size: 10px;
-    opacity: 0.9;
-  }
-  .meta {
-    display: inline-block;
-    font-size: 9.5pt;
-    opacity: 0.95;
-    text-align: right;
-    float: right;
-    margin-top: 8px;
-  }
-  .card {
-    background: #fff;
-    border-radius: 12px;
-    padding: 18px;
-    margin-top: 16px;
-    border: 1px solid #eef1fb;
-    /* box-shadow не поддерживается в mPDF */
-  }
-  .row {
-    width: 100%;
-    /* mPDF не поддерживает flex/gap, используем inline-block */
-    margin-bottom: 0;
-    white-space: nowrap;
-  }
-  .col-left {
-    width: 60%;
-    display: inline-block;
-    vertical-align: top;
-    white-space: normal;
-  }
-  .col-right {
-    width: 37%;
-    display: inline-block;
-    vertical-align: top;
-    text-align: center;
-    white-space: normal;
-  }
-  .service {
-    font-size: 18pt;
-    color: #6a2bb0;
-    font-weight: 800;
-    margin-bottom: 6px;
-  }
-  .meta-info {
-    font-size: 11pt;
-    color: #333;
-    margin-bottom: 8px;
-  }
-  .price {
-    font-size: 34pt;
-    color: #e13db7;
-    font-weight: 800;
-    margin-top: 6px;
-  }
-  .small {
-    font-size: 9.5pt;
-    color: #6b7280;
-  }
-  .qr {
-    width: 200px;
-    height: 200px;
-    border-radius: 8px;
-    border: 1px solid #f1f3f8;
-    background: #fff;
-    padding: 6px;
-    margin: 0 auto;
-    display: block;
-  }
-  .contact {
-    font-size: 10pt;
-    color: #333;
-    margin-bottom: 6px;
-  }
-  .voucher-link {
-    word-break: break-all;
-    font-size: 9.5pt;
-    color: #9b3cf0;
-  }
-  .footer {
-    margin-top: 18px;
-    font-size: 9pt;
-    color: #6b7280;
-    border-top: 1px dashed #e6eaf6;
-    padding-top: 12px;
-  }
-  .cta {
-    display: inline-block;
-    margin-top: 10px;
-    padding: 10px 18px;
-    border-radius: 24px;
-    color: #fff;
-    background: #e13db7;
-    font-weight: 700;
-    text-decoration: none;
-    font-size: 11pt;
-  }
-  @media print {
-    body { background: #fff; }
-    .page { padding: 8px; }
-  }
+  @page { size: A6; margin: 8mm; }
+  html, body { margin:0; padding:0; font-family: DejaVu Sans, sans-serif; color:#0e1d26; }
+  body { font-size: 10pt; }
+  .wrap { width:100%; }
+  .badge { display:inline-block; padding:2mm 4mm; border-radius:999px; background:#e9fbff; color:#0f3950; border:0.2mm solid #bfe8f2; font-size:9pt; letter-spacing:.04em; }
+  h1.title { margin:6mm 0 2mm; font-weight:700; font-size:16pt; letter-spacing:.02em; text-transform:uppercase; color:#0f3a50; line-height:1.25; }
+  .meta { color:#3c6b7c; margin-bottom:6mm; }
+
+  table.grid { width:100%; border-collapse:separate; border-spacing:0 3mm; }
+  td.col { width:50%; vertical-align:top; }
+  .h { font-size:8pt; color:#4c8598; text-transform:uppercase; letter-spacing:.04em; }
+  .v { font-size:12pt; color:#0e1d26; font-weight:700; }
+
+  hr.sep { border:0; height:0; border-top:0.3mm solid #cfe7ef; margin:5mm 0 4mm; }
+
+  table.qr { width:100%; }
+  td.qr-left { width:58%; vertical-align:top; }
+  td.qr-right { width:42%; text-align:right; vertical-align:middle; }
+  img.qr { width:34mm; height:34mm; }
+
+  .note { color:#4c8598; font-size:9pt; margin-top:1.5mm; line-height:1.35; }
+  .foot { margin-top:5mm; color:#446c7d; font-size:8.5pt; border-top:0.3mm solid #cfe7ef; padding-top:3mm; line-height:1.35; }
+  .mono { font-family: DejaVu Sans Mono, monospace; letter-spacing:.02em; }
+  a.link { color:#1c7aa5; text-decoration:none; border-bottom:0.2mm dotted #1c7aa5; }
 </style>
 </head>
 <body>
-  <div class="page">
-    <div class="header">
-      <div class="brand">
-        <img src="{{logo_src}}" alt="logo" class="logo" />
-        <div>
-          <div class="company">Дворец водных видов спорта</div>
-          <div class="company-sub">г. Екатеринбург</div>
-        </div>
-      </div>
-      <div class="meta">
-        <div>Документ: <strong>{{docId}}</strong></div>
-        <div>Дата: {{date}}</div>
-      </div>
-      <div style="clear: both;"></div>
-    </div>
+  <div class="wrap">
+    <span class="badge">Абонемент ДВВС</span>
+    <h1 class="title">{{service_name}}</h1>
+    <div class="meta">Документ: <span class="mono">{{docId}}</span> · Дата: {{date}}</div>
 
-    <div class="card">
-      <div class="row">
-        <div class="col-left">
-          <div class="service">{{service_name}}</div>
-          <div class="meta-info">Количество посещений: <strong>{{visits}}</strong> &nbsp;·&nbsp; Дней заморозки: <strong>{{freezing}}</strong></div>
-          <div class="price">{{price}} ₽</div>
+    <table class="grid">
+      <tr>
+        <td class="col"><div class="h">Стоимость</div><div class="v">{{price}} ₽</div></td>
+        <td class="col"><div class="h">Посещений</div><div class="v">{{visits}}</div></td>
+      </tr>
+      <tr>
+        <td class="col"><div class="h">Заморозка</div><div class="v">{{freezing}} дней</div></td>
+        <td class="col"><div class="h">Ссылка ваучера</div><div><a class="link" href="{{voucher_url}}">{{voucher_url}}</a></div></td>
+      </tr>
+      <tr>
+        <td class="col"><div class="h">Телефон</div><div class="v">{{phone}}</div></td>
+        <td class="col"><div class="h">E‑mail</div><div class="v">{{email}}</div></td>
+      </tr>
+    </table>
 
-          <div style="margin-top:12px;">
-            <a class="cta" href="{{voucher_url}}">Скачать ваучер</a>
-          </div>
+    <hr class="sep" />
 
-          <div style="margin-top:14px;" class="small">
-            <div class="contact">Телефон: {{phone}}</div>
-            <div class="contact">E-mail: {{email}}</div>
-            <div style="margin-top:10px;" class="voucher-link">Ссылка: <a href="{{voucher_url}}">{{voucher_url}}</a></div>
-          </div>
-        </div>
+    <table class="qr">
+      <tr>
+        <td class="qr-left">
+          <div class="h" style="font-size:10pt; color:#0f3a50;">QR‑код подтверждения</div>
+          <div class="note">Покажите этот код на стойке администратора. По QR подтверждается право на услугу.</div>
+        </td>
+        <td class="qr-right">
+          <img class="qr" src="{{qr_code_data}}" alt="QR-code" />
+        </td>
+      </tr>
+    </table>
 
-        <div class="col-right" style="text-align:center;">
-          <img src="{{qr_code_data}}" alt="QR" class="qr" />
-        </div>
-      </div>
-
-      <div class="footer">Этот абонемент предназначен для индивидуального использования. По вопросам звоните +7 (343) 222‑22‑33</div>
+    <div class="foot">
+      Настоящий абонемент является электронным документом, сформированным автоматически.
+      Данные держателя: телефон {{phone}}, e‑mail {{email}}. Документ № <span class="mono">{{docId}}</span>.
     </div>
   </div>
 </body>
